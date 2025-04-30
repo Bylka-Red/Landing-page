@@ -34,6 +34,8 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
   React.useEffect(() => {
     const fetchEstimation = async () => {
       try {
+        console.log('Sending estimation request with data:', propertyData);
+        
         const response = await fetch('/.netlify/functions/estimate', {
           method: 'POST',
           headers: {
@@ -42,18 +44,17 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           body: JSON.stringify(propertyData),
         });
 
-        if (!response.ok) {
-          throw new Error('Erreur lors de l\'estimation');
-        }
-
+        console.log('Response status:', response.status);
         const data = await response.json();
-        if (data.error) {
-          throw new Error(data.error);
+        console.log('Response data:', data);
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Erreur lors de l\'estimation');
         }
         
         setEstimation(data);
       } catch (err) {
-        console.error('Erreur:', err);
+        console.error('Detailed error:', err);
         setError(err instanceof Error ? err.message : 'Une erreur est survenue');
       } finally {
         setIsLoading(false);
