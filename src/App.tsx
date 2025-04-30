@@ -14,6 +14,13 @@ function App() {
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState('');
 
+  const handleAddressSubmit = (address: string) => {
+    setSelectedAddress(address);
+    setIsAddressModalOpen(false);
+    // Utiliser l'état pour passer l'adresse via l'URL
+    window.location.href = `/estimation?address=${encodeURIComponent(address)}`;
+  };
+
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-white">
@@ -28,17 +35,20 @@ function App() {
               <FAQ />
             </main>
           } />
-          <Route path="/estimation" element={<ValuationForm initialAddress={selectedAddress} />} />
+          <Route 
+            path="/estimation" 
+            element={
+              <ValuationForm 
+                initialAddress={new URLSearchParams(window.location.search).get('address') || ''} 
+              />
+            } 
+          />
         </Routes>
         <Footer />
         <AddressModal
           isOpen={isAddressModalOpen}
           onClose={() => setIsAddressModalOpen(false)}
-          onSubmit={(address) => {
-            setSelectedAddress(address);
-            setIsAddressModalOpen(false);
-            window.location.href = '/estimation';
-          }}
+          onSubmit={handleAddressSubmit}
         />
       </div>
     </BrowserRouter>
