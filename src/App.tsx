@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
-import { ValuationForm } from './components/ValuationForm';
+import { ValuationForm } from './components/ValuationForm/ValuationForm';
 import { HowItWorks } from './components/HowItWorks';
 import { Technology } from './components/Technology';
 import { Testimonials } from './components/Testimonials';

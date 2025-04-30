@@ -9,9 +9,68 @@ interface ValuationFormProps {
   initialAddress?: string;
 }
 
+interface PropertyData {
+  type: 'house' | 'apartment';
+  address: string;
+  livingArea: number;
+  rooms: number;
+  constructionYear?: number;
+  floor?: number;
+  hasElevator?: boolean;
+  condition: string;
+}
+
 export function ValuationForm({ initialAddress }: ValuationFormProps) {
   const [step, setStep] = useState(1);
-  const [propertyType, setPropertyType] = useState<'house' | 'apartment' | null>(null);
+  const [propertyData, setPropertyData] = useState<Partial<PropertyData>>({
+    address: initialAddress || ''
+  });
+
+  const handlePropertyType = (type: 'house' | 'apartment') => {
+    setPropertyData(prev => ({ ...prev, type }));
+    setStep(2);
+  };
+
+  const handlePropertyDetails = (details: any) => {
+    setPropertyData(prev => ({ ...prev, ...details }));
+    setStep(3);
+  };
+
+  const handlePropertyFeatures = (features: any) => {
+    setPropertyData(prev => ({ ...prev, condition: features.condition }));
+    setStep(4);
+  };
+
+  const handleOwnership = () => {
+    setStep(5);
+  };
+
+  const renderStep = () => {
+    switch (step) {
+      case 1:
+        return <PropertyTypeStep onSelect={handlePropertyType} />;
+      case 2:
+        return (
+          <PropertyDetailsStep
+            type={propertyData.type!}
+            onSubmit={handlePropertyDetails}
+          />
+        );
+      case 3:
+        return <PropertyFeaturesStep onSubmit={handlePropertyFeatures} />;
+      case 4:
+        return <OwnershipStep onSubmit={handleOwnership} />;
+      case 5:
+        return (
+          <EstimationResult
+            propertyData={propertyData as PropertyData}
+            onComplete={() => window.location.href = '/'}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   const steps = [
     'Type de bien',
@@ -21,41 +80,14 @@ export function ValuationForm({ initialAddress }: ValuationFormProps) {
     'Résultat'
   ];
 
-  const renderStep = () => {
-    switch (step) {
-      case 1:
-        return (
-          <PropertyTypeStep
-            onSelect={(type) => {
-              setPropertyType(type);
-              setStep(2);
-            }}
-          />
-        );
-      case 2:
-        return (
-          <PropertyDetailsStep
-            type={propertyType!}
-            onSubmit={() => setStep(3)}
-          />
-        );
-      case 3:
-        return <PropertyFeaturesStep onSubmit={() => setStep(4)} />;
-      case 4:
-        return <OwnershipStep onSubmit={() => setStep(5)} />;
-      case 5:
-        return <EstimationResult onComplete={() => window.location.href = '/'} />;
-      default:
-        return null;
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {initialAddress && (
           <div className="mb-6 p-4 bg-white rounded-lg shadow-sm">
-            <p className="text-gray-600">Adresse du bien : <span className="font-medium text-gray-900">{initialAddress}</span></p>
+            <p className="text-gray-600">
+              Adresse du bien : <span className="font-medium text-gray-900">{initialAddress}</span>
+            </p>
           </div>
         )}
         
