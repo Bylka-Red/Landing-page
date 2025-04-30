@@ -36,12 +36,26 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
       try {
         console.log('Sending estimation request with data:', propertyData);
         
+        // Vérification que l'adresse est présente
+        if (!propertyData.address) {
+          throw new Error('Adresse manquante');
+        }
+
         const response = await fetch('/.netlify/functions/estimate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(propertyData),
+          body: JSON.stringify({
+            address: propertyData.address,
+            type: propertyData.type,
+            livingArea: propertyData.livingArea,
+            rooms: propertyData.rooms,
+            constructionYear: propertyData.constructionYear,
+            floor: propertyData.floor,
+            hasElevator: propertyData.hasElevator,
+            condition: propertyData.condition
+          }),
         });
 
         console.log('Response status:', response.status);
