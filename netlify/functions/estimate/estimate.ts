@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { Handler } from '@netlify/functions';
 
 interface PropertyData {
   type: 'house' | 'apartment';
@@ -17,17 +17,22 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-const handler = async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+const handler: Handler = async (event) => {
+  // Gestion des requêtes OPTIONS pour CORS
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: ''
+    };
   }
 
   try {
-    if (!req.body) {
+    if (!event.body) {
       throw new Error('Données manquantes');
     }
 
-    const propertyData: PropertyData = await req.json();
+    const propertyData: PropertyData = JSON.parse(event.body);
 
     // Validation des données requises
     if (!propertyData.address) throw new Error('Adresse manquante');
@@ -35,12 +40,6 @@ const handler = async (req: Request) => {
     if (!propertyData.livingArea) throw new Error('Surface habitable manquante');
     if (!propertyData.rooms) throw new Error('Nombre de pièces manquant');
     if (!propertyData.condition) throw new Error('État du bien manquant');
-
-    // Initialisation du client Supabase
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || '',
-      process.env.VITE_SUPABASE_ANON_KEY || ''
-    );
 
     // Récupération des coordonnées de l'adresse
     const geocodeResponse = await fetch(
@@ -59,40 +58,9 @@ const handler = async (req: Request) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
-    // Récupération des ventes comparables depuis Supabase
-    const { data: comparableSales, error: dbError } = await supabase
-      .from('property_sales')
-      .select('*')
-      .eq('type', propertyData.type)
-      .gte('surface', propertyData.livingArea * 0.7)
-      .lte('surface', propertyData.livingArea * 1.3)
-      .gte('latitude', latitude - 0.02)
-      .lte('latitude', latitude + 0.02)
-      .gte('longitude', longitude - 0.02)
-      .lte('longitude', longitude + 0.02)
-      .order('date', { ascending: false })
-      .limit(10);
-
-    if (dbError) {
-      console.error('Erreur base de données:', dbError);
-      throw new Error('Erreur lors de la récupération des données');
-    }
-
-    console.log('Ventes comparables trouvées:', comparableSales?.length);
-    console.log('Coordonnées:', { latitude, longitude });
-
     // Prix moyens par défaut pour Lagny-sur-Marne
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
-    
-    // Calcul basé sur les ventes comparables si disponibles
-    if (comparableSales && comparableSales.length > 0) {
-      const averagePrice = comparableSales.reduce((acc, sale) => {
-        return acc + (sale.price / sale.surface);
-      }, 0) / comparableSales.length;
-      
-      estimatedPrice = averagePrice * propertyData.livingArea;
-    }
 
     // Ajustement selon l'état du bien
     const conditionMultipliers = {
@@ -108,7 +76,7 @@ const handler = async (req: Request) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Réduction de la marge pour la fourchette de prix
-    const margin = comparableSales?.length > 0 ? 0.05 : 0.08;
+    const margin = 0.08;
 
     const estimate = {
       average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
@@ -117,41 +85,31 @@ const handler = async (req: Request) => {
         min: Math.round(adjustedPrice * (1 - margin)),
         max: Math.round(adjustedPrice * (1 + margin))
       },
-      comparable_sales: comparableSales?.length || 0,
-      confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
+      comparable_sales: 0,
+      confidence_score: 0.3
     };
 
-    return new Response(
-      JSON.stringify(estimate),
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        }
-      }
-    );
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders
+      },
+      body: JSON.stringify(estimate)
+    };
   } catch (error) {
     console.error('Erreur:', error);
-    return new Response(
-      JSON.stringify({ 
+    return {
+      statusCode: 400,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders
+      },
+      body: JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Une erreur est survenue'
-      }),
-      {
-        status: 400,
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        }
-      }
-    );
+      })
+    };
   }
 };
-
-function calculateConfidenceScore(numComparables: number): number {
-  if (numComparables >= 5) return 0.9;
-  if (numComparables >= 3) return 0.7;
-  if (numComparables >= 1) return 0.5;
-  return 0.3;
-}
 
 export { handler };
