@@ -13,8 +13,8 @@ interface PropertyData {
 }
 
 const supabase = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_ANON_KEY || ''
+  process.env.VITE_SUPABASE_URL || '',
+  process.env.VITE_SUPABASE_ANON_KEY || ''
 );
 
 const corsHeaders = {
@@ -23,8 +23,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-const handler: Handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') {
+const handler: Handler = async (req) => {
+  if (req.method === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: corsHeaders
@@ -32,7 +32,15 @@ const handler: Handler = async (event) => {
   }
 
   try {
-    const { address, ...propertyData } = JSON.parse(event.body || '{}');
+    if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_ANON_KEY) {
+      throw new Error('Configuration Supabase manquante');
+    }
+
+    const { address, ...propertyData } = JSON.parse(req.body || '{}');
+
+    if (!address) {
+      throw new Error('Adresse manquante');
+    }
 
     // Récupération des coordonnées de l'adresse
     const geocodeResponse = await fetch(
