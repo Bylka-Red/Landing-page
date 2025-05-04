@@ -34,24 +34,25 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
   React.useEffect(() => {
     const fetchEstimation = async () => {
       try {
-        console.log('Sending estimation request with data:', propertyData);
+        const requestData = {
+          type: propertyData.type,
+          address: propertyData.address,
+          livingArea: propertyData.livingArea,
+          rooms: propertyData.rooms,
+          constructionYear: propertyData.constructionYear,
+          floor: propertyData.floor,
+          hasElevator: propertyData.hasElevator,
+          condition: propertyData.condition
+        };
+
+        console.log('Sending estimation request with data:', requestData);
         
-        // Vérification que l'adresse est présente
-        if (!propertyData.address) {
-          throw new Error('Adresse manquante');
-        }
-
-        // Use the correct endpoint URL based on the environment
-        const endpoint = import.meta.env.DEV 
-          ? '/.netlify/functions/estimate'
-          : 'https://estimation.2r-immobilier.fr/.netlify/functions/estimate';
-
-        const response = await fetch(endpoint, {
+        const response = await fetch('/.netlify/functions/estimate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(propertyData),
+          body: JSON.stringify(requestData),
         });
 
         console.log('Response status:', response.status);
@@ -59,7 +60,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         console.log('Response data:', data);
 
         if (!response.ok) {
-          throw new Error(data.error || 'Erreur lors de l\'estimation');
+          throw new Error(data.error || 'Une erreur est survenue');
         }
         
         setEstimation(data);

@@ -19,6 +19,7 @@ const corsHeaders = {
 };
 
 const handler: Handler = async (event) => {
+  // Handle preflight requests
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
@@ -27,21 +28,32 @@ const handler: Handler = async (event) => {
   }
 
   try {
-    // Utilisation des variables d'environnement du frontend
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || '',
-      process.env.VITE_SUPABASE_ANON_KEY || ''
-    );
+    if (!event.body) {
+      throw new Error('Données manquantes');
+    }
 
-    const { address, ...propertyData } = JSON.parse(event.body || '{}');
+    const propertyData: PropertyData = JSON.parse(event.body);
 
-    if (!address) {
+    // Validate required fields
+    if (!propertyData.address) {
       throw new Error('Adresse manquante');
+    }
+    if (!propertyData.type) {
+      throw new Error('Type de bien manquant');
+    }
+    if (!propertyData.livingArea) {
+      throw new Error('Surface habitable manquante');
+    }
+    if (!propertyData.rooms) {
+      throw new Error('Nombre de pièces manquant');
+    }
+    if (!propertyData.condition) {
+      throw new Error('État du bien manquant');
     }
 
     // Récupération des coordonnées de l'adresse
     const geocodeResponse = await fetch(
-      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}&limit=1`
+      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
     );
     
     if (!geocodeResponse.ok) {
@@ -56,41 +68,9 @@ const handler: Handler = async (event) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
-    // Récupération des ventes comparables depuis Supabase
-    const { data: comparableSales, error } = await supabase
-      .from('property_sales')
-      .select('*')
-      .eq('type', propertyData.type)
-      .gte('surface', propertyData.livingArea * 0.8)
-      .lte('surface', propertyData.livingArea * 1.2);
-
-    if (error) {
-      throw error;
-    }
-
-    // Filtrage des ventes par distance (500m)
-    const filteredSales = comparableSales?.filter(sale => {
-      const distance = calculateDistance(
-        latitude,
-        longitude,
-        sale.latitude,
-        sale.longitude
-      );
-      return distance <= 0.5; // 500m en kilomètres
-    }) || [];
-
     // Prix moyens par défaut pour Lagny-sur-Marne
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
-    
-    // Si on a des ventes comparables, on utilise leur prix moyen
-    if (filteredSales.length > 0) {
-      const averagePrice = filteredSales.reduce((acc, sale) => {
-        return acc + (sale.price / sale.surface);
-      }, 0) / filteredSales.length;
-      
-      estimatedPrice = averagePrice * propertyData.livingArea;
-    }
     
     // Ajustement selon l'état du bien
     const conditionMultipliers = {
@@ -106,7 +86,7 @@ const handler: Handler = async (event) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Réduction de la marge pour la fourchette de prix
-    const margin = filteredSales.length > 0 ? 0.05 : 0.08; // 5% si ventes comparables, 8% sinon
+    const margin = 0.08; // 8% de marge
 
     const estimate = {
       average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
@@ -115,8 +95,8 @@ const handler: Handler = async (event) => {
         min: Math.round(adjustedPrice * (1 - margin)),
         max: Math.round(adjustedPrice * (1 + margin))
       },
-      comparable_sales: filteredSales.length,
-      confidence_score: calculateConfidenceScore(filteredSales.length)
+      comparable_sales: 0,
+      confidence_score: 0.3
     };
 
     return {
@@ -141,28 +121,5 @@ const handler: Handler = async (event) => {
     };
   }
 };
-
-function calculateConfidenceScore(numComparables: number): number {
-  if (numComparables >= 5) return 0.9;
-  if (numComparables >= 3) return 0.7;
-  if (numComparables >= 1) return 0.5;
-  return 0.3;
-}
-
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Rayon de la Terre en kilomètres
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
-
-function toRad(degrees: number): number {
-  return degrees * (Math.PI / 180);
-}
 
 export { handler };
