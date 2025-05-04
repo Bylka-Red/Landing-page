@@ -6,6 +6,12 @@ export function Hero() {
   const [selectedAddress, setSelectedAddress] = useState('');
   const navigate = useNavigate();
 
+  const handleEstimation = () => {
+    if (selectedAddress) {
+      window.location.href = `/estimation?address=${encodeURIComponent(selectedAddress)}`;
+    }
+  };
+
   return (
     <section className="relative bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
@@ -29,7 +35,7 @@ export function Hero() {
                     selectedAddress ? 'bg-[#0b8043] hover:bg-[#096a36]' : 'bg-gray-400 cursor-not-allowed'
                   }`}
                   disabled={!selectedAddress}
-                  onClick={() => navigate('/estimation')}
+                  onClick={handleEstimation}
                 >
                   Estimer
                 </button>

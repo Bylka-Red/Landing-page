@@ -26,6 +26,29 @@ export function ValuationForm({ initialAddress }: ValuationFormProps) {
     address: initialAddress || ''
   });
 
+  // Validate that we have an address
+  if (!initialAddress) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-12">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="bg-white rounded-xl shadow-lg p-12">
+            <p className="text-red-600 text-center">
+              Veuillez fournir une adresse pour obtenir une estimation.
+            </p>
+            <div className="mt-4 text-center">
+              <a
+                href="/"
+                className="inline-block px-4 py-2 bg-[#0b8043] text-white rounded-md hover:bg-[#096a36] transition-colors"
+              >
+                Retour à l'accueil
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const handlePropertyType = (type: 'house' | 'apartment') => {
     setPropertyData(prev => ({ ...prev, type }));
     setStep(2);
