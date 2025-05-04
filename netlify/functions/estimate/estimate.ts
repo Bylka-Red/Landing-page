@@ -28,6 +28,11 @@ const handler: Handler = async (event) => {
   }
 
   try {
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL!,
+      process.env.VITE_SUPABASE_ANON_KEY!
+    );
+
     const { address, ...propertyData } = JSON.parse(event.body || '{}');
 
     if (!address) {
@@ -51,9 +56,37 @@ const handler: Handler = async (event) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
+    // Récupération des ventes comparables depuis Supabase
+    const { data: comparableSales, error } = await supabase
+      .from('property_sales')
+      .select('*')
+      .eq('type', propertyData.type)
+      // Filtre sur la surface (±20%)
+      .gte('surface', propertyData.livingArea * 0.8)
+      .lte('surface', propertyData.livingArea * 1.2)
+      // Filtre sur la localisation (rayon de 500m)
+      .rpc('nearby_properties', { 
+        lat: latitude,
+        lng: longitude,
+        radius: 500 
+      });
+
+    if (error) {
+      throw error;
+    }
+
     // Prix moyens par défaut pour Lagny-sur-Marne
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
-    const estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
+    let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
+    
+    // Si on a des ventes comparables, on utilise leur prix moyen
+    if (comparableSales && comparableSales.length > 0) {
+      const averagePrice = comparableSales.reduce((acc, sale) => {
+        return acc + (sale.price / sale.surface);
+      }, 0) / comparableSales.length;
+      
+      estimatedPrice = averagePrice * propertyData.livingArea;
+    }
     
     // Ajustement selon l'état du bien
     const conditionMultipliers = {
@@ -68,15 +101,18 @@ const handler: Handler = async (event) => {
     const multiplier = conditionMultipliers[propertyData.condition] || 1;
     const adjustedPrice = estimatedPrice * multiplier;
 
+    // Réduction de la marge pour la fourchette de prix
+    const margin = comparableSales?.length > 0 ? 0.05 : 0.08; // 5% si ventes comparables, 8% sinon
+
     const estimate = {
-      average_price_per_sqm: Math.round(defaultPricePerM2 * multiplier),
+      average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
       estimated_price: Math.round(adjustedPrice),
       price_range: {
-        min: Math.round(adjustedPrice * 0.85),
-        max: Math.round(adjustedPrice * 1.15)
+        min: Math.round(adjustedPrice * (1 - margin)),
+        max: Math.round(adjustedPrice * (1 + margin))
       },
-      comparable_sales: 0,
-      confidence_score: 0.3
+      comparable_sales: comparableSales?.length || 0,
+      confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
     };
 
     return {
@@ -101,5 +137,12 @@ const handler: Handler = async (event) => {
     };
   }
 };
+
+function calculateConfidenceScore(numComparables: number): number {
+  if (numComparables >= 5) return 0.9;
+  if (numComparables >= 3) return 0.7;
+  if (numComparables >= 1) return 0.5;
+  return 0.3;
+}
 
 export { handler };
