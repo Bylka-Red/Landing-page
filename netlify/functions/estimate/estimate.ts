@@ -27,9 +27,10 @@ const handler: Handler = async (event) => {
   }
 
   try {
+    // Utilisation des variables d'environnement du frontend
     const supabase = createClient(
-      process.env.SUPABASE_URL || '',
-      process.env.SUPABASE_ANON_KEY || ''
+      process.env.VITE_SUPABASE_URL || '',
+      process.env.VITE_SUPABASE_ANON_KEY || ''
     );
 
     const { address, ...propertyData } = JSON.parse(event.body || '{}');
