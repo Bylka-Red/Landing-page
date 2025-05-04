@@ -45,8 +45,9 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           condition: propertyData.condition
         };
 
-        console.log('Sending estimation request with data:', requestData);
+        console.log('Envoi de la requête avec les données:', requestData);
         
+        // Utilisation de l'URL relative pour la fonction
         const response = await fetch('/.netlify/functions/estimate', {
           method: 'POST',
           headers: {
@@ -55,18 +56,17 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           body: JSON.stringify(requestData),
         });
 
-        console.log('Response status:', response.status);
-        const data = await response.json();
-        console.log('Response data:', data);
-
         if (!response.ok) {
-          throw new Error(data.error || 'Une erreur est survenue');
+          const errorText = await response.text();
+          console.error('Réponse du serveur:', errorText);
+          throw new Error(`Erreur serveur: ${response.status}`);
         }
-        
+
+        const data = await response.json();
         setEstimation(data);
       } catch (err) {
-        console.error('Detailed error:', err);
-        setError(err instanceof Error ? err.message : 'Une erreur est survenue');
+        console.error('Erreur détaillée:', err);
+        setError(err instanceof Error ? err.message : 'Une erreur est survenue lors de l\'estimation');
       } finally {
         setIsLoading(false);
       }
