@@ -1,4 +1,3 @@
-import { Handler } from '@netlify/functions';
 import { createClient } from '@supabase/supabase-js';
 
 interface PropertyData {
@@ -18,40 +17,26 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-const handler: Handler = async (event) => {
-  // Handle preflight requests
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: corsHeaders
-    };
+const handler = async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    if (!event.body) {
+    if (!req.body) {
       throw new Error('Données manquantes');
     }
 
-    const propertyData: PropertyData = JSON.parse(event.body);
+    const propertyData: PropertyData = await req.json();
 
-    // Validate required fields
-    if (!propertyData.address) {
-      throw new Error('Adresse manquante');
-    }
-    if (!propertyData.type) {
-      throw new Error('Type de bien manquant');
-    }
-    if (!propertyData.livingArea) {
-      throw new Error('Surface habitable manquante');
-    }
-    if (!propertyData.rooms) {
-      throw new Error('Nombre de pièces manquant');
-    }
-    if (!propertyData.condition) {
-      throw new Error('État du bien manquant');
-    }
+    // Validation des données requises
+    if (!propertyData.address) throw new Error('Adresse manquante');
+    if (!propertyData.type) throw new Error('Type de bien manquant');
+    if (!propertyData.livingArea) throw new Error('Surface habitable manquante');
+    if (!propertyData.rooms) throw new Error('Nombre de pièces manquant');
+    if (!propertyData.condition) throw new Error('État du bien manquant');
 
-    // Initialiser le client Supabase
+    // Initialisation du client Supabase
     const supabase = createClient(
       process.env.VITE_SUPABASE_URL || '',
       process.env.VITE_SUPABASE_ANON_KEY || ''
@@ -74,22 +59,22 @@ const handler: Handler = async (event) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
-    // Récupération des ventes comparables depuis Supabase avec une marge de tolérance plus grande
+    // Récupération des ventes comparables depuis Supabase
     const { data: comparableSales, error: dbError } = await supabase
       .from('property_sales')
       .select('*')
       .eq('type', propertyData.type)
-      .gte('surface', propertyData.livingArea * 0.7) // Augmentation de la marge
+      .gte('surface', propertyData.livingArea * 0.7)
       .lte('surface', propertyData.livingArea * 1.3)
-      .gte('latitude', latitude - 0.02) // Augmentation du rayon à environ 2km
+      .gte('latitude', latitude - 0.02)
       .lte('latitude', latitude + 0.02)
       .gte('longitude', longitude - 0.02)
       .lte('longitude', longitude + 0.02)
-      .order('date', { ascending: false }) // Trier par date décroissante
-      .limit(10); // Limiter à 10 résultats
+      .order('date', { ascending: false })
+      .limit(10);
 
     if (dbError) {
-      console.error('Database error:', dbError);
+      console.error('Erreur base de données:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
@@ -100,7 +85,7 @@ const handler: Handler = async (event) => {
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
     
-    // Si on a des ventes comparables, on utilise leur prix moyen
+    // Calcul basé sur les ventes comparables si disponibles
     if (comparableSales && comparableSales.length > 0) {
       const averagePrice = comparableSales.reduce((acc, sale) => {
         return acc + (sale.price / sale.surface);
@@ -123,7 +108,7 @@ const handler: Handler = async (event) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Réduction de la marge pour la fourchette de prix
-    const margin = comparableSales?.length > 0 ? 0.05 : 0.08; // 5% si ventes comparables, 8% sinon
+    const margin = comparableSales?.length > 0 ? 0.05 : 0.08;
 
     const estimate = {
       average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
@@ -136,26 +121,29 @@ const handler: Handler = async (event) => {
       confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
     };
 
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-      body: JSON.stringify(estimate)
-    };
+    return new Response(
+      JSON.stringify(estimate),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders
+        }
+      }
+    );
   } catch (error) {
     console.error('Erreur:', error);
-    return {
-      statusCode: 400,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-      body: JSON.stringify({ 
+    return new Response(
+      JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Une erreur est survenue'
-      })
-    };
+      }),
+      {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders
+        }
+      }
+    );
   }
 };
 
