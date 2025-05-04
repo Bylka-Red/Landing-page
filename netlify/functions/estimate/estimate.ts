@@ -74,22 +74,27 @@ const handler: Handler = async (event) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
-    // Récupération des ventes comparables depuis Supabase
+    // Récupération des ventes comparables depuis Supabase avec une marge de tolérance plus grande
     const { data: comparableSales, error: dbError } = await supabase
       .from('property_sales')
       .select('*')
       .eq('type', propertyData.type)
-      .gte('surface', propertyData.livingArea * 0.8)
-      .lte('surface', propertyData.livingArea * 1.2)
-      .gte('latitude', latitude - 0.01) // Environ 1km
-      .lte('latitude', latitude + 0.01)
-      .gte('longitude', longitude - 0.01)
-      .lte('longitude', longitude + 0.01);
+      .gte('surface', propertyData.livingArea * 0.7) // Augmentation de la marge
+      .lte('surface', propertyData.livingArea * 1.3)
+      .gte('latitude', latitude - 0.02) // Augmentation du rayon à environ 2km
+      .lte('latitude', latitude + 0.02)
+      .gte('longitude', longitude - 0.02)
+      .lte('longitude', longitude + 0.02)
+      .order('date', { ascending: false }) // Trier par date décroissante
+      .limit(10); // Limiter à 10 résultats
 
     if (dbError) {
       console.error('Database error:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
+
+    console.log('Ventes comparables trouvées:', comparableSales?.length);
+    console.log('Coordonnées:', { latitude, longitude });
 
     // Prix moyens par défaut pour Lagny-sur-Marne
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
