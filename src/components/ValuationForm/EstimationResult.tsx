@@ -41,21 +41,17 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           throw new Error('Adresse manquante');
         }
 
-        const response = await fetch('/.netlify/functions/estimate', {
+        // Use the correct endpoint URL based on the environment
+        const endpoint = import.meta.env.DEV 
+          ? '/.netlify/functions/estimate'
+          : 'https://estimation.2r-immobilier.fr/.netlify/functions/estimate';
+
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            address: propertyData.address,
-            type: propertyData.type,
-            livingArea: propertyData.livingArea,
-            rooms: propertyData.rooms,
-            constructionYear: propertyData.constructionYear,
-            floor: propertyData.floor,
-            hasElevator: propertyData.hasElevator,
-            condition: propertyData.condition
-          }),
+          body: JSON.stringify(propertyData),
         });
 
         console.log('Response status:', response.status);
