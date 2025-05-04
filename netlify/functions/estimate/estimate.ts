@@ -19,7 +19,6 @@ const corsHeaders = {
 };
 
 const handler: Handler = async (event) => {
-  // Gestion des requêtes OPTIONS pour CORS
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
@@ -29,8 +28,8 @@ const handler: Handler = async (event) => {
 
   try {
     const supabase = createClient(
-      process.env.VITE_SUPABASE_URL!,
-      process.env.VITE_SUPABASE_ANON_KEY!
+      process.env.SUPABASE_URL || '',
+      process.env.SUPABASE_ANON_KEY || ''
     );
 
     const { address, ...propertyData } = JSON.parse(event.body || '{}');
@@ -61,29 +60,33 @@ const handler: Handler = async (event) => {
       .from('property_sales')
       .select('*')
       .eq('type', propertyData.type)
-      // Filtre sur la surface (±20%)
       .gte('surface', propertyData.livingArea * 0.8)
-      .lte('surface', propertyData.livingArea * 1.2)
-      // Filtre sur la localisation (rayon de 500m)
-      .rpc('nearby_properties', { 
-        lat: latitude,
-        lng: longitude,
-        radius: 500 
-      });
+      .lte('surface', propertyData.livingArea * 1.2);
 
     if (error) {
       throw error;
     }
+
+    // Filtrage des ventes par distance (500m)
+    const filteredSales = comparableSales?.filter(sale => {
+      const distance = calculateDistance(
+        latitude,
+        longitude,
+        sale.latitude,
+        sale.longitude
+      );
+      return distance <= 0.5; // 500m en kilomètres
+    }) || [];
 
     // Prix moyens par défaut pour Lagny-sur-Marne
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
     
     // Si on a des ventes comparables, on utilise leur prix moyen
-    if (comparableSales && comparableSales.length > 0) {
-      const averagePrice = comparableSales.reduce((acc, sale) => {
+    if (filteredSales.length > 0) {
+      const averagePrice = filteredSales.reduce((acc, sale) => {
         return acc + (sale.price / sale.surface);
-      }, 0) / comparableSales.length;
+      }, 0) / filteredSales.length;
       
       estimatedPrice = averagePrice * propertyData.livingArea;
     }
@@ -102,7 +105,7 @@ const handler: Handler = async (event) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Réduction de la marge pour la fourchette de prix
-    const margin = comparableSales?.length > 0 ? 0.05 : 0.08; // 5% si ventes comparables, 8% sinon
+    const margin = filteredSales.length > 0 ? 0.05 : 0.08; // 5% si ventes comparables, 8% sinon
 
     const estimate = {
       average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
@@ -111,8 +114,8 @@ const handler: Handler = async (event) => {
         min: Math.round(adjustedPrice * (1 - margin)),
         max: Math.round(adjustedPrice * (1 + margin))
       },
-      comparable_sales: comparableSales?.length || 0,
-      confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
+      comparable_sales: filteredSales.length,
+      confidence_score: calculateConfidenceScore(filteredSales.length)
     };
 
     return {
@@ -143,6 +146,22 @@ function calculateConfidenceScore(numComparables: number): number {
   if (numComparables >= 3) return 0.7;
   if (numComparables >= 1) return 0.5;
   return 0.3;
+}
+
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Rayon de la Terre en kilomètres
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+function toRad(degrees: number): number {
+  return degrees * (Math.PI / 180);
 }
 
 export { handler };
