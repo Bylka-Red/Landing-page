@@ -33,17 +33,6 @@ Deno.serve(async (req) => {
     if (!propertyData.rooms) throw new Error('Nombre de pièces manquant');
     if (!propertyData.condition) throw new Error('État du bien manquant');
 
-    // Initialisation de Supabase
-    const supabaseUrl = Deno.env.get('VITE_SUPABASE_URL');
-    const supabaseKey = Deno.env.get('VITE_SUPABASE_ANON_KEY');
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Variables d\'environnement Supabase manquantes');
-      throw new Error('Configuration Supabase manquante');
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
     // Géocodage de l'adresse
     const geocodeUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`;
     console.log('URL de géocodage:', geocodeUrl);
@@ -56,58 +45,51 @@ Deno.serve(async (req) => {
     }
 
     const geocodeData = await geocodeResponse.json();
-    console.log('Réponse géocodage complète:', JSON.stringify(geocodeData, null, 2));
+    console.log('Réponse géocodage:', geocodeData);
     
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
-    console.log('Coordonnées obtenues:', { latitude, longitude });
+    console.log('Coordonnées:', { latitude, longitude });
 
-    // Vérification préliminaire des données dans la base
-    const { data: sampleData, error: sampleError } = await supabase
+    // Initialisation de Supabase
+    const supabase = createClient(
+      Deno.env.get('VITE_SUPABASE_URL') || '',
+      Deno.env.get('VITE_SUPABASE_ANON_KEY') || ''
+    );
+
+    // Test de connexion Supabase
+    const { data: testData, error: testError } = await supabase
       .from('dvf_idf')
       .select('*')
       .limit(1);
 
-    console.log('Échantillon de données:', sampleData);
-    if (sampleError) {
-      console.error('Erreur lors de la vérification des données:', sampleError);
-    }
+    console.log('Test Supabase:', {
+      connexionOk: !!testData,
+      erreur: testError,
+      premierEnregistrement: testData?.[0]
+    });
 
     // Paramètres de recherche
     const searchRadius = 0.005; // environ 500m
     const minSurface = propertyData.livingArea * 0.6;
     const maxSurface = propertyData.livingArea * 1.4;
 
-    // Test de requête simple
-    const { data: simpleTest, error: simpleError } = await supabase
-      .from('dvf_idf')
-      .select('*')
-      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
-      .limit(5);
-
-    console.log('Test de requête simple:', {
-      resultats: simpleTest?.length || 0,
-      erreur: simpleError,
-      premierResultat: simpleTest?.[0]
-    });
-
-    // Construction de la requête principale
-    const query = supabase
+    // Recherche de biens comparables
+    const { data: comparableSales, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
       .gte('Surface reelle bati', minSurface)
       .lte('Surface reelle bati', maxSurface)
+      .not('Latitude', 'is', null)
+      .not('Longitude', 'is', null)
       .gte('Latitude', latitude - searchRadius)
       .lte('Latitude', latitude + searchRadius)
       .gte('Longitude', longitude - searchRadius)
       .lte('Longitude', longitude + searchRadius);
-
-    // Log de la requête SQL
-    const { data: comparableSales, error: dbError } = await query;
 
     if (dbError) {
       console.error('Erreur Supabase:', dbError);
@@ -125,7 +107,7 @@ Deno.serve(async (req) => {
         longitudeMax: longitude + searchRadius
       },
       nombreResultats: comparableSales?.length || 0,
-      resultats: comparableSales?.map(sale => ({
+      biensComparables: comparableSales?.map(sale => ({
         adresse: sale.Adresse,
         type: sale['Type local'],
         surface: sale['Surface reelle bati'],
