@@ -1,11 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.39.0';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
 interface PropertyData {
   type: 'house' | 'apartment';
   address: string;
@@ -17,120 +11,11 @@ interface PropertyData {
   condition: string;
 }
 
-async function fetchDVFData(address: string, radius: number = 1000) {
-  try {
-    // Récupération des coordonnées de l'adresse
-    const geocodeResponse = await fetch(
-      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}&limit=1`
-    );
-    const geocodeData = await geocodeResponse.json();
-    
-    if (!geocodeData.features?.[0]) {
-      throw new Error('Adresse non trouvée');
-    }
-
-    const [lon, lat] = geocodeData.features[0].geometry.coordinates;
-
-    // Récupération des ventes DVF
-    const dvfUrl = `https://files.data.gouv.fr/geo-dvf/latest/mutations/${lat}/${lon}/${radius}`;
-    const dvfResponse = await fetch(dvfUrl);
-    
-    if (!dvfResponse.ok) {
-      throw new Error(`Erreur lors de la récupération des données DVF: ${dvfResponse.status}`);
-    }
-    
-    const dvfData = await dvfResponse.json();
-
-    return {
-      coordinates: { lat, lon },
-      sales: dvfData.mutations || []
-    };
-  } catch (error) {
-    console.error('Erreur détaillée:', error);
-    throw error;
-  }
-}
-
-async function fetchCurrentListings(lat: number, lon: number) {
-  // Ici, vous devriez intégrer une API d'annonces immobilières
-  // Par exemple SeLoger, LeBonCoin, etc.
-  // Pour l'exemple, nous retournons des données fictives
-  return [];
-}
-
-function calculateEstimate(
-  propertyData: PropertyData,
-  historicalSales: any[],
-  currentListings: any[]
-) {
-  // Si pas de ventes comparables, on utilise une estimation basée sur des moyennes locales
-  if (!historicalSales.length) {
-    // Prix moyens au m² pour Lagny-sur-Marne (données 2024)
-    const averagePrice = propertyData.type === 'house' ? 3800 : 4200;
-    const estimatedPrice = averagePrice * propertyData.livingArea;
-    const margin = 0.15; // 15% de marge
-
-    return {
-      average_price_per_sqm: averagePrice,
-      estimated_price: Math.round(estimatedPrice),
-      price_range: {
-        min: Math.round(estimatedPrice * (1 - margin)),
-        max: Math.round(estimatedPrice * (1 + margin))
-      },
-      comparable_sales: 0,
-      confidence_score: 0.3
-    };
-  }
-
-  // Filtrage des ventes comparables
-  const comparableSales = historicalSales.filter(sale => {
-    return (
-      sale.type_local?.toLowerCase() === propertyData.type &&
-      Math.abs(sale.surface_reelle_bati - propertyData.livingArea) <= 20
-    );
-  });
-
-  // Calcul du prix moyen au m²
-  const averagePrice = comparableSales.reduce((acc, sale) => {
-    return acc + (sale.valeur_fonciere / sale.surface_reelle_bati);
-  }, 0) / comparableSales.length;
-
-  // Ajustements selon les caractéristiques
-  let adjustedPrice = averagePrice;
-
-  // Ajustement selon l'état
-  const conditionMultipliers = {
-    'À rénover': 0.8,
-    'Travaux à prévoir': 0.9,
-    'Bon état': 1,
-    'Très bon état': 1.1,
-    'Refait à neuf': 1.15,
-    'Neuf': 1.2
-  };
-  adjustedPrice *= conditionMultipliers[propertyData.condition] || 1;
-
-  // Calcul de la fourchette de prix
-  const estimatedPrice = adjustedPrice * propertyData.livingArea;
-  const margin = 0.1; // 10% de marge
-
-  return {
-    average_price_per_sqm: Math.round(adjustedPrice),
-    estimated_price: Math.round(estimatedPrice),
-    price_range: {
-      min: Math.round(estimatedPrice * (1 - margin)),
-      max: Math.round(estimatedPrice * (1 + margin))
-    },
-    comparable_sales: comparableSales.length,
-    confidence_score: calculateConfidenceScore(comparableSales.length)
-  };
-}
-
-function calculateConfidenceScore(numComparables: number): number {
-  if (numComparables >= 10) return 0.9;
-  if (numComparables >= 5) return 0.7;
-  if (numComparables >= 3) return 0.5;
-  return 0.3;
-}
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS'
+};
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -138,48 +23,143 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { address, ...propertyData } = await req.json();
+    const propertyData: PropertyData = await req.json();
 
-    if (!address) {
-      throw new Error('Adresse manquante');
+    // Validation des données requises
+    if (!propertyData.address) throw new Error('Adresse manquante');
+    if (!propertyData.type) throw new Error('Type de bien manquant');
+    if (!propertyData.livingArea) throw new Error('Surface habitable manquante');
+    if (!propertyData.rooms) throw new Error('Nombre de pièces manquant');
+    if (!propertyData.condition) throw new Error('État du bien manquant');
+
+    // Initialisation de Supabase
+    const supabase = createClient(
+      Deno.env.get('VITE_SUPABASE_URL') || '',
+      Deno.env.get('VITE_SUPABASE_ANON_KEY') || ''
+    );
+
+    // Géocodage de l'adresse
+    const geocodeResponse = await fetch(
+      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
+    );
+    
+    if (!geocodeResponse.ok) {
+      throw new Error('Erreur lors de la géolocalisation');
     }
 
-    // Récupération des données DVF
-    const { coordinates, sales } = await fetchDVFData(address);
+    const geocodeData = await geocodeResponse.json();
     
-    // Récupération des annonces actuelles
-    const currentListings = await fetchCurrentListings(
-      coordinates.lat,
-      coordinates.lon
-    );
+    if (!geocodeData.features?.[0]) {
+      throw new Error('Adresse non trouvée');
+    }
 
-    // Calcul de l'estimation
-    const estimate = calculateEstimate(
-      propertyData,
-      sales,
-      currentListings
-    );
+    const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
+
+    // Recherche de biens comparables
+    const { data: comparableSales, error: dbError } = await supabase
+      .from('property_sales')
+      .select('*')
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .gte('Surface reelle bati', propertyData.livingArea * 0.8)
+      .lte('Surface reelle bati', propertyData.livingArea * 1.2)
+      .gte('Latitude', latitude - 0.01)
+      .lte('Latitude', latitude + 0.01)
+      .gte('Longitude', longitude - 0.01)
+      .lte('Longitude', longitude + 0.01)
+      .order('Date mutation', { ascending: false })
+      .limit(10);
+
+    if (dbError) {
+      console.error('Erreur Supabase:', dbError);
+      throw new Error('Erreur lors de la récupération des données');
+    }
+
+    // Log pour debugging
+    console.log({
+      address: propertyData.address,
+      coordinates: { latitude, longitude },
+      comparableSalesCount: comparableSales?.length,
+      searchCriteria: {
+        type: propertyData.type,
+        surfaceMin: propertyData.livingArea * 0.8,
+        surfaceMax: propertyData.livingArea * 1.2,
+        latitudeRange: [latitude - 0.01, latitude + 0.01],
+        longitudeRange: [longitude - 0.01, longitude + 0.01]
+      }
+    });
+
+    // Calcul du prix
+    const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
+    let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
+
+    if (comparableSales && comparableSales.length > 0) {
+      // Calcul de la moyenne pondérée par la date
+      const totalWeight = comparableSales.reduce((sum, sale) => sum + 1, 0);
+      const weightedSum = comparableSales.reduce((sum, sale, index) => {
+        const weight = (comparableSales.length - index) / totalWeight;
+        return sum + (sale['Valeur fonciere'] / sale['Surface reelle bati']) * weight;
+      }, 0);
+
+      estimatedPrice = weightedSum * propertyData.livingArea;
+    }
+
+    // Ajustements selon l'état
+    const conditionMultipliers = {
+      'À rénover': 0.8,
+      'Travaux à prévoir': 0.9,
+      'Bon état': 1,
+      'Très bon état': 1.1,
+      'Refait à neuf': 1.15,
+      'Neuf': 1.2
+    };
+
+    const multiplier = conditionMultipliers[propertyData.condition] || 1;
+    const adjustedPrice = estimatedPrice * multiplier;
+
+    // Calcul de la marge d'erreur
+    const margin = comparableSales?.length >= 5 ? 0.05 : 
+                  comparableSales?.length >= 3 ? 0.07 : 0.1;
+
+    const estimate = {
+      average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
+      estimated_price: Math.round(adjustedPrice),
+      price_range: {
+        min: Math.round(adjustedPrice * (1 - margin)),
+        max: Math.round(adjustedPrice * (1 + margin))
+      },
+      comparable_sales: comparableSales?.length || 0,
+      confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
+    };
 
     return new Response(
       JSON.stringify(estimate),
       {
         headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...corsHeaders
         }
       }
     );
   } catch (error) {
-    console.error('Erreur complète:', error);
+    console.error('Erreur détaillée:', error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Une erreur est survenue'
+      }),
       {
         status: 400,
         headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...corsHeaders
         }
       }
     );
   }
 });
+
+function calculateConfidenceScore(numComparables: number): number {
+  if (numComparables >= 5) return 0.9;
+  if (numComparables >= 3) return 0.7;
+  if (numComparables >= 1) return 0.5;
+  return 0.3;
+}
