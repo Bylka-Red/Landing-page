@@ -24,6 +24,7 @@ Deno.serve(async (req) => {
 
   try {
     const propertyData: PropertyData = await req.json();
+    console.log('Données reçues:', propertyData);
 
     // Validation des données requises
     if (!propertyData.address) throw new Error('Adresse manquante');
@@ -48,15 +49,17 @@ Deno.serve(async (req) => {
     }
 
     const geocodeData = await geocodeResponse.json();
+    console.log('Données de géocodage:', geocodeData);
     
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
+    console.log('Coordonnées:', { latitude, longitude });
 
-    // Recherche de biens comparables avec une requête plus souple
-    const { data: comparableSales, error: dbError } = await supabase
+    // Recherche de biens comparables
+    const query = supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
@@ -68,39 +71,26 @@ Deno.serve(async (req) => {
       .lte('Longitude', longitude + 0.002)
       .order('Date mutation', { ascending: false });
 
+    console.log('Requête SQL générée:', query.toSQL());
+
+    const { data: comparableSales, error: dbError } = await query;
+
     if (dbError) {
       console.error('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    // Log détaillé pour debugging
-    console.log({
-      recherche: {
-        adresse: propertyData.address,
-        coordonnees: { latitude, longitude },
-        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
-        surface: propertyData.livingArea,
-        criteres: {
-          surfaceMin: propertyData.livingArea * 0.7,
-          surfaceMax: propertyData.livingArea * 1.3,
-          latitudeMin: latitude - 0.002,
-          latitudeMax: latitude + 0.002,
-          longitudeMin: longitude - 0.002,
-          longitudeMax: longitude + 0.002
-        }
-      },
-      resultats: {
-        nombreBiensTrouves: comparableSales?.length || 0,
-        biensTrouves: comparableSales?.map(sale => ({
-          adresse: sale.Adresse,
-          type: sale['Type local'],
-          surface: sale['Surface reelle bati'],
-          prix: sale['Valeur fonciere'],
-          latitude: sale.Latitude,
-          longitude: sale.Longitude,
-          date: sale['Date mutation']
-        }))
-      }
+    console.log('Résultats de la recherche:', {
+      nombreBiensTrouves: comparableSales?.length || 0,
+      biensTrouves: comparableSales?.map(sale => ({
+        adresse: sale.Adresse,
+        type: sale['Type local'],
+        surface: sale['Surface reelle bati'],
+        prix: sale['Valeur fonciere'],
+        latitude: sale.Latitude,
+        longitude: sale.Longitude,
+        date: sale['Date mutation']
+      }))
     });
 
     // Calcul du prix
@@ -108,7 +98,6 @@ Deno.serve(async (req) => {
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
 
     if (comparableSales && comparableSales.length > 0) {
-      // Calcul de la moyenne pondérée par la date
       const totalWeight = comparableSales.reduce((sum, sale) => sum + 1, 0);
       const weightedSum = comparableSales.reduce((sum, sale, index) => {
         const weight = (comparableSales.length - index) / totalWeight;
