@@ -55,36 +55,51 @@ Deno.serve(async (req) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
-    // Recherche de biens comparables
+    // Recherche de biens comparables avec une requête plus souple
     const { data: comparableSales, error: dbError } = await supabase
       .from('property_sales')
       .select('*')
-      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
-      .gte('Surface reelle bati', propertyData.livingArea * 0.8)
-      .lte('Surface reelle bati', propertyData.livingArea * 1.2)
-      .gte('Latitude', latitude - 0.01)
-      .lte('Latitude', latitude + 0.01)
-      .gte('Longitude', longitude - 0.01)
-      .lte('Longitude', longitude + 0.01)
-      .order('Date mutation', { ascending: false })
-      .limit(10);
+      .ilike('Type local', propertyData.type === 'house' ? '%maison%' : '%appartement%')
+      .gte('Surface reelle bati', propertyData.livingArea * 0.7) // Critères plus souples
+      .lte('Surface reelle bati', propertyData.livingArea * 1.3)
+      .gte('Latitude', latitude - 0.002) // Rayon plus petit pour plus de précision
+      .lte('Latitude', latitude + 0.002)
+      .gte('Longitude', longitude - 0.002)
+      .lte('Longitude', longitude + 0.002)
+      .order('Date mutation', { ascending: false });
 
     if (dbError) {
       console.error('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    // Log pour debugging
+    // Log détaillé pour debugging
     console.log({
-      address: propertyData.address,
-      coordinates: { latitude, longitude },
-      comparableSalesCount: comparableSales?.length,
-      searchCriteria: {
-        type: propertyData.type,
-        surfaceMin: propertyData.livingArea * 0.8,
-        surfaceMax: propertyData.livingArea * 1.2,
-        latitudeRange: [latitude - 0.01, latitude + 0.01],
-        longitudeRange: [longitude - 0.01, longitude + 0.01]
+      recherche: {
+        adresse: propertyData.address,
+        coordonnees: { latitude, longitude },
+        type: propertyData.type === 'house' ? 'maison' : 'appartement',
+        surface: propertyData.livingArea,
+        criteres: {
+          surfaceMin: propertyData.livingArea * 0.7,
+          surfaceMax: propertyData.livingArea * 1.3,
+          latitudeMin: latitude - 0.002,
+          latitudeMax: latitude + 0.002,
+          longitudeMin: longitude - 0.002,
+          longitudeMax: longitude + 0.002
+        }
+      },
+      resultats: {
+        nombreBiensTrouves: comparableSales?.length || 0,
+        biensTrouves: comparableSales?.map(sale => ({
+          adresse: sale.Adresse,
+          type: sale['Type local'],
+          surface: sale['Surface reelle bati'],
+          prix: sale['Valeur fonciere'],
+          latitude: sale.Latitude,
+          longitude: sale.Longitude,
+          date: sale['Date mutation']
+        }))
       }
     });
 
