@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ruler, Grid, Bath, Stars as Stairs, Building2 } from 'lucide-react';
+import { Ruler, Grid, Bath, Stars as Stairs, Building2, Map } from 'lucide-react';
 
 interface PropertyDetailsStepProps {
   type: 'house' | 'apartment';
@@ -16,6 +16,7 @@ interface PropertyDetails {
   hasPrivateGarden?: boolean;
   isTopFloor?: boolean;
   parkingSpaces?: number;
+  landArea?: number;
 }
 
 export function PropertyDetailsStep({ type, onSubmit }: PropertyDetailsStepProps) {
@@ -29,6 +30,7 @@ export function PropertyDetailsStep({ type, onSubmit }: PropertyDetailsStepProps
     hasPrivateGarden: false,
     isTopFloor: false,
     parkingSpaces: 0,
+    landArea: type === 'house' ? 0 : undefined,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -61,6 +63,27 @@ export function PropertyDetailsStep({ type, onSubmit }: PropertyDetailsStepProps
             placeholder="80"
           />
         </div>
+
+        {type === 'house' && (
+          <div className="relative">
+            <div className="flex items-center space-x-2 mb-1.5">
+              <Map className="w-4 h-4 text-[#0b8043]" />
+              <label className="block text-sm font-medium text-gray-700">
+                Surface du terrain (m²)
+              </label>
+            </div>
+            <input
+              type="number"
+              min="0"
+              value={details.landArea}
+              onChange={(e) =>
+                setDetails({ ...details, landArea: Number(e.target.value) })
+              }
+              className="w-full px-3 py-2 text-sm rounded-md border-2 border-gray-200 focus:border-[#0b8043] focus:ring-0 transition-colors"
+              placeholder="300"
+            />
+          </div>
+        )}
 
         <div className="relative">
           <div className="flex items-center space-x-2 mb-1.5">
