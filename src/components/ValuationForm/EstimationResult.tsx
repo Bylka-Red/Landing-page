@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, Euro, Phone, Building2, MapPin, BarChart as ChartBar } from 'lucide-react';
+import { Loader2, Euro, Phone, Building2, MapPin, BarChart as ChartBar, AlertCircle } from 'lucide-react';
 
 interface EstimationResultProps {
   onComplete: () => void;
@@ -30,6 +30,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
   const [isLoading, setIsLoading] = React.useState(true);
   const [estimation, setEstimation] = React.useState<EstimationData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const fetchEstimation = async () => {
@@ -56,17 +57,28 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           body: JSON.stringify(requestData),
         });
 
+        console.log('Statut de la réponse:', response.status);
+        
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('Réponse du serveur:', errorText);
-          throw new Error(`Erreur serveur: ${response.status}`);
+          console.error('Réponse d\'erreur du serveur:', errorText);
+          
+          try {
+            const errorJson = JSON.parse(errorText);
+            throw new Error(errorJson.error || `Erreur serveur: ${response.status}`);
+          } catch (e) {
+            throw new Error(`Erreur serveur: ${response.status}`);
+          }
         }
 
         const data = await response.json();
+        console.log('Données reçues de l\'API:', data);
         setEstimation(data);
       } catch (err) {
         console.error('Erreur détaillée:', err);
         setError(err instanceof Error ? err.message : 'Une erreur est survenue lors de l\'estimation');
+        // Stockage des informations de débogage pour affichage en mode développement
+        setDebugInfo(JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
       } finally {
         setIsLoading(false);
       }
@@ -96,13 +108,28 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
   if (error) {
     return (
       <div className="text-center py-6">
-        <p className="text-red-600 mb-4">{error}</p>
-        <button
-          onClick={onComplete}
-          className="px-4 py-2 text-sm bg-[#0b8043] text-white rounded-md hover:bg-[#096a36] transition-colors font-medium"
-        >
-          Réessayer
-        </button>
+        <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-4" />
+        <p className="text-red-600 mb-4 font-medium">{error}</p>
+        {process.env.NODE_ENV === 'development' && debugInfo && (
+          <details className="mb-4 text-left bg-gray-100 p-3 rounded-md">
+            <summary className="cursor-pointer text-sm text-gray-700 font-medium">Détails techniques</summary>
+            <pre className="mt-2 text-xs overflow-auto max-h-40">{debugInfo}</pre>
+          </details>
+        )}
+        <div className="flex space-x-3 justify-center">
+          <button
+            onClick={onComplete}
+            className="px-4 py-2 text-sm bg-[#0b8043] text-white rounded-md hover:bg-[#096a36] transition-colors font-medium"
+          >
+            Retour
+          </button>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors font-medium"
+          >
+            Réessayer
+          </button>
+        </div>
       </div>
     );
   }
@@ -111,6 +138,9 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
 
   const confidenceLabel = estimation.confidence_score >= 0.7 ? 'Élevée' : 
                          estimation.confidence_score >= 0.5 ? 'Moyenne' : 'Faible';
+  
+  const confidenceColor = estimation.confidence_score >= 0.7 ? 'text-green-600' : 
+                         estimation.confidence_score >= 0.5 ? 'text-yellow-600' : 'text-red-600';
 
   return (
     <div className="space-y-6">
@@ -139,19 +169,37 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
             <ChartBar className="w-4 h-4 text-[#0b8043]" />
             <span className="font-medium">Précision de l'estimation</span>
           </div>
-          <div className="text-sm text-gray-600">
-            <p>Fiabilité : {confidenceLabel}</p>
+          <div className="text-sm space-y-1">
+            <p>Fiabilité : <span className={confidenceColor + " font-medium"}>{confidenceLabel}</span></p>
             <p>{estimation.comparable_sales} ventes comparables analysées</p>
+            {estimation.comparable_sales === 0 && (
+              <div className="text-xs text-red-600 mt-1">
+                Aucun bien comparable trouvé. L'estimation est basée sur des moyennes régionales.
+              </div>
+            )}
           </div>
         </div>
 
         <div className="bg-gray-50 p-4 rounded-md">
           <div className="flex items-center space-x-2 mb-2">
-            <MapPin className="w-4 h-4 text-[#0b8043]" />
-            <span className="font-medium">Localisation</span>
+            <Building2 className="w-4 h-4 text-[#0b8043]" />
+            <span className="font-medium">Caractéristiques du bien</span>
           </div>
-          <p className="text-sm text-gray-600">{propertyData.address}</p>
+          <div className="text-sm text-gray-600 space-y-1">
+            <p>Type : {propertyData.type === 'house' ? 'Maison' : 'Appartement'}</p>
+            <p>Surface : {propertyData.livingArea} m²</p>
+            <p>Pièces : {propertyData.rooms}</p>
+            <p>État : {propertyData.condition}</p>
+          </div>
         </div>
+      </div>
+
+      <div className="bg-gray-50 p-4 rounded-md">
+        <div className="flex items-center space-x-2 mb-2">
+          <MapPin className="w-4 h-4 text-[#0b8043]" />
+          <span className="font-medium">Localisation</span>
+        </div>
+        <p className="text-sm text-gray-600">{propertyData.address}</p>
       </div>
 
       <div className="bg-gray-50 p-4 rounded-md border-2 border-gray-200">
