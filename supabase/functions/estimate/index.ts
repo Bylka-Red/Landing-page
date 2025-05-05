@@ -57,12 +57,12 @@ Deno.serve(async (req) => {
 
     // Recherche de biens comparables avec une requête plus souple
     const { data: comparableSales, error: dbError } = await supabase
-      .from('property_sales')
+      .from('dvf_idf')
       .select('*')
-      .ilike('Type local', propertyData.type === 'house' ? '%maison%' : '%appartement%')
-      .gte('Surface reelle bati', propertyData.livingArea * 0.7) // Critères plus souples
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .gte('Surface reelle bati', propertyData.livingArea * 0.7)
       .lte('Surface reelle bati', propertyData.livingArea * 1.3)
-      .gte('Latitude', latitude - 0.002) // Rayon plus petit pour plus de précision
+      .gte('Latitude', latitude - 0.002)
       .lte('Latitude', latitude + 0.002)
       .gte('Longitude', longitude - 0.002)
       .lte('Longitude', longitude + 0.002)
@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
       recherche: {
         adresse: propertyData.address,
         coordonnees: { latitude, longitude },
-        type: propertyData.type === 'house' ? 'maison' : 'appartement',
+        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
         surface: propertyData.livingArea,
         criteres: {
           surfaceMin: propertyData.livingArea * 0.7,

@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from 'npm:@supabase/supabase-js@2.39.0';
 
 interface PropertyData {
   type: 'house' | 'apartment';
@@ -17,21 +17,15 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-const handler = async (req: Request) => {
-  // Gestion des requêtes OPTIONS pour CORS
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Validation du body de la requête
-    if (!req.body) {
-      throw new Error('Données manquantes');
-    }
-
     const propertyData: PropertyData = await req.json();
 
-    // Validation des champs requis
+    // Validation des données requises
     if (!propertyData.address) throw new Error('Adresse manquante');
     if (!propertyData.type) throw new Error('Type de bien manquant');
     if (!propertyData.livingArea) throw new Error('Surface habitable manquante');
@@ -40,8 +34,8 @@ const handler = async (req: Request) => {
 
     // Initialisation de Supabase
     const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || '',
-      process.env.VITE_SUPABASE_ANON_KEY || ''
+      Deno.env.get('VITE_SUPABASE_URL') || '',
+      Deno.env.get('VITE_SUPABASE_ANON_KEY') || ''
     );
 
     // Géocodage de l'adresse
@@ -61,35 +55,51 @@ const handler = async (req: Request) => {
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
 
-    // Recherche de biens comparables
+    // Recherche de biens comparables avec une requête plus souple
     const { data: comparableSales, error: dbError } = await supabase
-      .from('property_sales')
+      .from('dvf_idf')
       .select('*')
-      .eq('type', propertyData.type)
-      .gte('surface', propertyData.livingArea * 0.8)
-      .lte('surface', propertyData.livingArea * 1.2)
-      .gte('latitude', latitude - 0.015)
-      .lte('latitude', latitude + 0.015)
-      .gte('longitude', longitude - 0.015)
-      .lte('longitude', longitude + 0.015)
-      .order('date', { ascending: false });
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .gte('Surface reelle bati', propertyData.livingArea * 0.7)
+      .lte('Surface reelle bati', propertyData.livingArea * 1.3)
+      .gte('Latitude', latitude - 0.002)
+      .lte('Latitude', latitude + 0.002)
+      .gte('Longitude', longitude - 0.002)
+      .lte('Longitude', longitude + 0.002)
+      .order('Date mutation', { ascending: false });
 
     if (dbError) {
       console.error('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    // Log pour debugging
+    // Log détaillé pour debugging
     console.log({
-      address: propertyData.address,
-      coordinates: { latitude, longitude },
-      comparableSalesCount: comparableSales?.length,
-      searchCriteria: {
-        type: propertyData.type,
-        surfaceMin: propertyData.livingArea * 0.8,
-        surfaceMax: propertyData.livingArea * 1.2,
-        latitudeRange: [latitude - 0.015, latitude + 0.015],
-        longitudeRange: [longitude - 0.015, longitude + 0.015]
+      recherche: {
+        adresse: propertyData.address,
+        coordonnees: { latitude, longitude },
+        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
+        surface: propertyData.livingArea,
+        criteres: {
+          surfaceMin: propertyData.livingArea * 0.7,
+          surfaceMax: propertyData.livingArea * 1.3,
+          latitudeMin: latitude - 0.002,
+          latitudeMax: latitude + 0.002,
+          longitudeMin: longitude - 0.002,
+          longitudeMax: longitude + 0.002
+        }
+      },
+      resultats: {
+        nombreBiensTrouves: comparableSales?.length || 0,
+        biensTrouves: comparableSales?.map(sale => ({
+          adresse: sale.Adresse,
+          type: sale['Type local'],
+          surface: sale['Surface reelle bati'],
+          prix: sale['Valeur fonciere'],
+          latitude: sale.Latitude,
+          longitude: sale.Longitude,
+          date: sale['Date mutation']
+        }))
       }
     });
 
@@ -102,7 +112,7 @@ const handler = async (req: Request) => {
       const totalWeight = comparableSales.reduce((sum, sale) => sum + 1, 0);
       const weightedSum = comparableSales.reduce((sum, sale, index) => {
         const weight = (comparableSales.length - index) / totalWeight;
-        return sum + (sale.price / sale.surface) * weight;
+        return sum + (sale['Valeur fonciere'] / sale['Surface reelle bati']) * weight;
       }, 0);
 
       estimatedPrice = weightedSum * propertyData.livingArea;
@@ -160,7 +170,7 @@ const handler = async (req: Request) => {
       }
     );
   }
-};
+});
 
 function calculateConfidenceScore(numComparables: number): number {
   if (numComparables >= 5) return 0.9;
@@ -168,5 +178,3 @@ function calculateConfidenceScore(numComparables: number): number {
   if (numComparables >= 1) return 0.5;
   return 0.3;
 }
-
-export { handler };
