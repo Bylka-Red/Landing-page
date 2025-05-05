@@ -33,159 +33,89 @@ Deno.serve(async (req) => {
     if (!propertyData.rooms) throw new Error('Nombre de pièces manquant');
     if (!propertyData.condition) throw new Error('État du bien manquant');
 
-    // Récupération des variables d'environnement Supabase
-    const supabaseUrl = Deno.env.get('VITE_SUPABASE_URL');
-    const supabaseKey = Deno.env.get('VITE_SUPABASE_ANON_KEY');
-    
-    // Vérification des variables d'environnement
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Variables d\'environnement Supabase manquantes', { 
-        supabaseUrl: !!supabaseUrl, 
-        supabaseKey: !!supabaseKey 
-      });
-      throw new Error('Configuration Supabase manquante');
-    }
-
     // Initialisation de Supabase
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(
+      Deno.env.get('VITE_SUPABASE_URL') || '',
+      Deno.env.get('VITE_SUPABASE_ANON_KEY') || ''
+    );
 
     // Géocodage de l'adresse
-    const geocodeUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`;
-    console.log('URL de géocodage:', geocodeUrl);
-    
-    const geocodeResponse = await fetch(geocodeUrl);
+    const geocodeResponse = await fetch(
+      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
+    );
     
     if (!geocodeResponse.ok) {
-      console.error('Erreur API géocodage:', geocodeResponse.status, await geocodeResponse.text());
       throw new Error('Erreur lors de la géolocalisation');
     }
 
     const geocodeData = await geocodeResponse.json();
-    console.log('Données de géocodage complètes:', JSON.stringify(geocodeData));
+    console.log('Données de géocodage:', geocodeData);
     
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
-    console.log('Coordonnées obtenues:', { latitude, longitude });
+    console.log('Coordonnées:', { latitude, longitude });
 
-    // Conversion du type de bien pour correspondre à la base de données
-    const dbPropertyType = propertyData.type === 'house' ? 'Maison' : 'Appartement';
-    console.log('Type de bien pour la recherche:', dbPropertyType);
-
-    // Élargissement du rayon de recherche pour plus de résultats
-    const searchRadius = 0.01; // Environ 1km
-    const minSurface = propertyData.livingArea * 0.5;
-    const maxSurface = propertyData.livingArea * 1.5;
+    // Paramètres de recherche
+    const searchRadius = 0.005; // environ 500m
+    const minSurface = propertyData.livingArea * 0.6;
+    const maxSurface = propertyData.livingArea * 1.4;
 
     console.log('Critères de recherche:', {
-      type: dbPropertyType,
-      minSurface,
-      maxSurface,
-      minLat: latitude - searchRadius,
-      maxLat: latitude + searchRadius,
-      minLng: longitude - searchRadius,
-      maxLng: longitude + searchRadius
+      type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
+      surfaceMin: minSurface,
+      surfaceMax: maxSurface,
+      latitude,
+      longitude,
+      rayon: searchRadius
     });
 
-    // Construction de la requête Supabase
-    const query = supabase
+    // Requête Supabase avec logging
+    const { data: comparableSales, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
-      .eq('Type local', dbPropertyType)
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
       .gte('Surface reelle bati', minSurface)
       .lte('Surface reelle bati', maxSurface)
+      .not('Latitude', 'is', null)
+      .not('Longitude', 'is', null)
       .gte('Latitude', latitude - searchRadius)
       .lte('Latitude', latitude + searchRadius)
       .gte('Longitude', longitude - searchRadius)
-      .lte('Longitude', longitude + searchRadius)
-      .not('Latitude', 'is', null)
-      .not('Longitude', 'is', null)
-      .order('Date mutation', { ascending: false });
-
-    // Afficher la requête SQL générée
-    const sqlQuery = query.toSQL();
-    console.log('Requête SQL générée:', sqlQuery);
-
-    // Exécution de la requête
-    const { data: comparableSales, error: dbError } = await query;
+      .lte('Longitude', longitude + searchRadius);
 
     if (dbError) {
       console.error('Erreur Supabase:', dbError);
-      throw new Error(`Erreur base de données: ${dbError.message}`);
+      throw new Error('Erreur lors de la récupération des données');
     }
 
-    console.log('Nombre de biens comparables trouvés:', comparableSales?.length || 0);
-    
-    // Afficher les détails des biens trouvés (si disponibles)
-    if (comparableSales && comparableSales.length > 0) {
-      console.log('Détails des biens comparables:', comparableSales.map(sale => ({
-        adresse: sale.Adresse,
-        type: sale['Type local'],
-        surface: sale['Surface reelle bati'],
-        prix: sale['Valeur fonciere'],
-        latitude: sale.Latitude,
-        longitude: sale.Longitude,
-        date: sale['Date mutation'],
-        distance: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude)
-      })));
-    } else {
-      // Si aucun bien comparable n'est trouvé, essayons une recherche plus large
-      console.log('Aucun bien comparable trouvé, tentative avec un rayon plus large...');
-      
-      const largeSearchRadius = 0.02; // Environ 2km
-      const { data: widerSearch, error: widerError } = await supabase
-        .from('dvf_idf')
-        .select('*')
-        .eq('Type local', dbPropertyType)
-        .gte('Surface reelle bati', minSurface)
-        .lte('Surface reelle bati', maxSurface)
-        .gte('Latitude', latitude - largeSearchRadius)
-        .lte('Latitude', latitude + largeSearchRadius)
-        .gte('Longitude', longitude - largeSearchRadius)
-        .lte('Longitude', longitude + largeSearchRadius)
-        .not('Latitude', 'is', null)
-        .not('Longitude', 'is', null)
-        .order('Date mutation', { ascending: false });
-      
-      if (!widerError && widerSearch && widerSearch.length > 0) {
-        console.log(`Trouvé ${widerSearch.length} biens avec un rayon élargi`);
-        comparableSales = widerSearch;
-      }
-    }
+    console.log('Résultats de la recherche:', {
+      nombreBiensTrouvés: comparableSales?.length || 0,
+      biens: comparableSales
+    });
 
     // Calcul du prix
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
 
     if (comparableSales && comparableSales.length > 0) {
-      // Calcul basé sur la distance et la date
       const weightedPrices = comparableSales.map(sale => {
         const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
-        const distanceWeight = Math.max(0.5, 1 - distance / 2); // Moins de poids pour les propriétés plus éloignées
-        
-        const saleDate = new Date(sale['Date mutation']);
-        const now = new Date();
-        const ageInMonths = (now.getFullYear() - saleDate.getFullYear()) * 12 + now.getMonth() - saleDate.getMonth();
-        const timeWeight = Math.max(0.7, 1 - ageInMonths / 36); // Moins de poids pour les ventes plus anciennes
-        
-        const totalWeight = distanceWeight * timeWeight;
-        const pricePerM2 = sale['Valeur fonciere'] / sale['Surface reelle bati'];
-        
+        const weight = Math.max(0.5, 1 - distance / 0.5); // Moins de poids pour les biens plus éloignés
         return {
-          pricePerM2,
-          weight: totalWeight
+          price: sale['Valeur fonciere'] / sale['Surface reelle bati'],
+          weight
         };
       });
-      
+
       const totalWeight = weightedPrices.reduce((sum, item) => sum + item.weight, 0);
-      const weightedAvgPricePerM2 = weightedPrices.reduce(
-        (sum, item) => sum + (item.pricePerM2 * item.weight), 0
+      const weightedAvgPrice = weightedPrices.reduce(
+        (sum, item) => sum + (item.price * item.weight), 0
       ) / (totalWeight || 1);
-      
-      estimatedPrice = weightedAvgPricePerM2 * propertyData.livingArea;
-      console.log('Prix moyen pondéré au m²:', weightedAvgPricePerM2);
+
+      estimatedPrice = weightedAvgPrice * propertyData.livingArea;
     }
 
     // Ajustements selon l'état
@@ -216,8 +146,6 @@ Deno.serve(async (req) => {
       confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
     };
 
-    console.log('Estimation finale:', estimate);
-
     return new Response(
       JSON.stringify(estimate),
       {
@@ -228,7 +156,7 @@ Deno.serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Erreur détaillée:', error);
+    console.error('Erreur:', error);
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Une erreur est survenue'
@@ -244,9 +172,8 @@ Deno.serve(async (req) => {
   }
 });
 
-// Fonction pour calculer la distance entre deux points GPS (en km)
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Rayon de la Terre en km
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = 
