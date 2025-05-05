@@ -58,17 +58,19 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     console.log('Coordonnées:', { latitude, longitude });
 
-    // Recherche de biens comparables
+    // Élargissement du rayon de recherche et des critères
     const query = supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
-      .gte('Surface reelle bati', propertyData.livingArea * 0.7)
-      .lte('Surface reelle bati', propertyData.livingArea * 1.3)
-      .gte('Latitude', latitude - 0.002)
-      .lte('Latitude', latitude + 0.002)
-      .gte('Longitude', longitude - 0.002)
-      .lte('Longitude', longitude + 0.002)
+      .gte('Surface reelle bati', propertyData.livingArea * 0.6) // Élargissement des critères de surface
+      .lte('Surface reelle bati', propertyData.livingArea * 1.4)
+      .gte('Latitude', latitude - 0.005) // Élargissement du rayon de recherche
+      .lte('Latitude', latitude + 0.005)
+      .gte('Longitude', longitude - 0.005)
+      .lte('Longitude', longitude + 0.005)
+      .not('Latitude', 'is', null) // Exclusion des entrées sans coordonnées
+      .not('Longitude', 'is', null)
       .order('Date mutation', { ascending: false });
 
     console.log('Requête SQL générée:', query.toSQL());
