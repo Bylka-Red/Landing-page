@@ -34,13 +34,11 @@ Deno.serve(async (req) => {
     if (!propertyData.condition) throw new Error('État du bien manquant');
 
     // Géocodage de l'adresse
-    const geocodeUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`;
-    console.log('URL de géocodage:', geocodeUrl);
-
-    const geocodeResponse = await fetch(geocodeUrl);
+    const geocodeResponse = await fetch(
+      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
+    );
     
     if (!geocodeResponse.ok) {
-      console.error('Erreur API géocodage:', geocodeResponse.status);
       throw new Error('Erreur lors de la géolocalisation');
     }
 
@@ -60,22 +58,21 @@ Deno.serve(async (req) => {
       Deno.env.get('VITE_SUPABASE_ANON_KEY') || ''
     );
 
-    // Test de connexion Supabase
-    const { data: testData, error: testError } = await supabase
-      .from('dvf_idf')
-      .select('*')
-      .limit(1);
-
-    console.log('Test Supabase:', {
-      connexionOk: !!testData,
-      erreur: testError,
-      premierEnregistrement: testData?.[0]
-    });
-
     // Paramètres de recherche
-    const searchRadius = 0.005; // environ 500m
+    const searchRadius = 0.02; // Augmenté à 0.02 degrés (environ 2km)
     const minSurface = propertyData.livingArea * 0.6;
     const maxSurface = propertyData.livingArea * 1.4;
+
+    // Log détaillé des critères de recherche
+    console.log('Critères de recherche:', {
+      type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
+      surfaceMin: minSurface,
+      surfaceMax: maxSurface,
+      latitudeMin: latitude - searchRadius,
+      latitudeMax: latitude + searchRadius,
+      longitudeMin: longitude - searchRadius,
+      longitudeMax: longitude + searchRadius
+    });
 
     // Recherche de biens comparables
     const { data: comparableSales, error: dbError } = await supabase
@@ -89,7 +86,8 @@ Deno.serve(async (req) => {
       .gte('Latitude', latitude - searchRadius)
       .lte('Latitude', latitude + searchRadius)
       .gte('Longitude', longitude - searchRadius)
-      .lte('Longitude', longitude + searchRadius);
+      .lte('Longitude', longitude + searchRadius)
+      .order('Date mutation', { ascending: false });
 
     if (dbError) {
       console.error('Erreur Supabase:', dbError);
@@ -97,24 +95,16 @@ Deno.serve(async (req) => {
     }
 
     console.log('Résultats de la recherche:', {
-      criteres: {
-        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
-        surfaceMin: minSurface,
-        surfaceMax: maxSurface,
-        latitudeMin: latitude - searchRadius,
-        latitudeMax: latitude + searchRadius,
-        longitudeMin: longitude - searchRadius,
-        longitudeMax: longitude + searchRadius
-      },
-      nombreResultats: comparableSales?.length || 0,
-      biensComparables: comparableSales?.map(sale => ({
+      nombreBiensTrouves: comparableSales?.length || 0,
+      biensTrouves: comparableSales?.map(sale => ({
         adresse: sale.Adresse,
         type: sale['Type local'],
         surface: sale['Surface reelle bati'],
         prix: sale['Valeur fonciere'],
         latitude: sale.Latitude,
         longitude: sale.Longitude,
-        distance: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude)
+        date: sale['Date mutation'],
+        distanceKm: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude)
       }))
     });
 
@@ -123,9 +113,10 @@ Deno.serve(async (req) => {
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
 
     if (comparableSales && comparableSales.length > 0) {
+      // Calcul de la moyenne pondérée par la date et la distance
       const weightedPrices = comparableSales.map(sale => {
         const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
-        const weight = Math.max(0.5, 1 - distance / 0.5);
+        const weight = Math.max(0.5, 1 - distance / 2); // Pondération basée sur la distance (max 2km)
         return {
           price: sale['Valeur fonciere'] / sale['Surface reelle bati'],
           weight
@@ -168,8 +159,6 @@ Deno.serve(async (req) => {
       confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
     };
 
-    console.log('Estimation finale:', estimate);
-
     return new Response(
       JSON.stringify(estimate),
       {
@@ -197,7 +186,7 @@ Deno.serve(async (req) => {
 });
 
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
+  const R = 6371; // Rayon de la Terre en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = 
