@@ -37,12 +37,12 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('VITE_SUPABASE_URL');
     const supabaseKey = Deno.env.get('VITE_SUPABASE_ANON_KEY');
 
-    console.log('Configuration Supabase:', {
-      urlPresent: !!supabaseUrl,
-      keyPresent: !!supabaseKey
-    });
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('Variables d\'environnement Supabase manquantes');
+      throw new Error('Configuration Supabase manquante');
+    }
 
-    const supabase = createClient(supabaseUrl || '', supabaseKey || '');
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Géocodage de l'adresse
     const geocodeUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`;
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     }
 
     const geocodeData = await geocodeResponse.json();
-    console.log('Réponse géocodage complète:', geocodeData);
+    console.log('Réponse géocodage complète:', JSON.stringify(geocodeData, null, 2));
     
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
@@ -65,36 +65,48 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     console.log('Coordonnées obtenues:', { latitude, longitude });
 
+    // Vérification préliminaire des données dans la base
+    const { data: sampleData, error: sampleError } = await supabase
+      .from('dvf_idf')
+      .select('*')
+      .limit(1);
+
+    console.log('Échantillon de données:', sampleData);
+    if (sampleError) {
+      console.error('Erreur lors de la vérification des données:', sampleError);
+    }
+
     // Paramètres de recherche
     const searchRadius = 0.005; // environ 500m
     const minSurface = propertyData.livingArea * 0.6;
     const maxSurface = propertyData.livingArea * 1.4;
 
-    const searchCriteria = {
-      type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
-      surfaceMin: minSurface,
-      surfaceMax: maxSurface,
-      latitudeMin: latitude - searchRadius,
-      latitudeMax: latitude + searchRadius,
-      longitudeMin: longitude - searchRadius,
-      longitudeMax: longitude + searchRadius
-    };
+    // Test de requête simple
+    const { data: simpleTest, error: simpleError } = await supabase
+      .from('dvf_idf')
+      .select('*')
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .limit(5);
 
-    console.log('Critères de recherche:', searchCriteria);
+    console.log('Test de requête simple:', {
+      resultats: simpleTest?.length || 0,
+      erreur: simpleError,
+      premierResultat: simpleTest?.[0]
+    });
 
-    // Construction de la requête
+    // Construction de la requête principale
     const query = supabase
       .from('dvf_idf')
       .select('*')
-      .eq('Type local', searchCriteria.type)
-      .gte('Surface reelle bati', searchCriteria.surfaceMin)
-      .lte('Surface reelle bati', searchCriteria.maxSurface)
-      .gte('Latitude', searchCriteria.latitudeMin)
-      .lte('Latitude', searchCriteria.latitudeMax)
-      .gte('Longitude', searchCriteria.longitudeMin)
-      .lte('Longitude', searchCriteria.longitudeMax);
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .gte('Surface reelle bati', minSurface)
+      .lte('Surface reelle bati', maxSurface)
+      .gte('Latitude', latitude - searchRadius)
+      .lte('Latitude', latitude + searchRadius)
+      .gte('Longitude', longitude - searchRadius)
+      .lte('Longitude', longitude + searchRadius);
 
-    // Exécution de la requête
+    // Log de la requête SQL
     const { data: comparableSales, error: dbError } = await query;
 
     if (dbError) {
@@ -102,10 +114,18 @@ Deno.serve(async (req) => {
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    // Log détaillé des résultats
     console.log('Résultats de la recherche:', {
-      nombreBiensTrouvés: comparableSales?.length || 0,
-      biens: comparableSales?.map(sale => ({
+      criteres: {
+        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
+        surfaceMin: minSurface,
+        surfaceMax: maxSurface,
+        latitudeMin: latitude - searchRadius,
+        latitudeMax: latitude + searchRadius,
+        longitudeMin: longitude - searchRadius,
+        longitudeMax: longitude + searchRadius
+      },
+      nombreResultats: comparableSales?.length || 0,
+      resultats: comparableSales?.map(sale => ({
         adresse: sale.Adresse,
         type: sale['Type local'],
         surface: sale['Surface reelle bati'],
