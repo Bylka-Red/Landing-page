@@ -44,20 +44,20 @@ Deno.serve(async (req) => {
     const geocodeResponse = await fetch(
       `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
     );
-    
+
     if (!geocodeResponse.ok) {
       throw new Error('Erreur lors de la géolocalisation');
     }
 
     const geocodeData = await geocodeResponse.json();
     console.log('Données de géocodage:', geocodeData);
-    
+
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
-    console.log('Coordonnées:', { latitude, longitude });
+    console.log('Coordonnées obtenues par géocodage:', { latitude, longitude });
 
     // Extraction du numéro de rue et du code postal
     const addressParts = propertyData.address.match(/(\d+).*?(\d{5})/);
@@ -79,13 +79,16 @@ Deno.serve(async (req) => {
       .gte('Surface reelle bati', propertyData.livingArea * (1 - surfaceMargin))
       .lte('Surface reelle bati', propertyData.livingArea * (1 + surfaceMargin));
 
-    // Recherche dans un rayon plus large (2km)
-    const searchRadius = 0.02;
+    // Recherche dans un rayon plus large (5km)
+    const searchRadius = 0.05; // environ 5 km
     query = query
       .gte('Latitude', latitude - searchRadius)
       .lte('Latitude', latitude + searchRadius)
       .gte('Longitude', longitude - searchRadius)
       .lte('Longitude', longitude + searchRadius);
+
+    // Log de la requête Supabase
+    console.log('Requête Supabase:', query);
 
     const { data: comparableSales, error: dbError } = await query;
 
@@ -110,7 +113,7 @@ Deno.serve(async (req) => {
     if (comparableSales && comparableSales.length > 0) {
       const weightedPrices = comparableSales.map(sale => {
         const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
-        const weight = Math.max(0.1, 1 - (distance / 2)); // Distance maximale de 2km
+        const weight = Math.max(0.1, 1 - (distance / 5)); // Distance maximale de 5km
         return {
           price: sale['Valeur fonciere'] / sale['Surface reelle bati'],
           weight
@@ -139,7 +142,7 @@ Deno.serve(async (req) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Calcul de la marge d'erreur
-    const margin = comparableSales?.length >= 5 ? 0.05 : 
+    const margin = comparableSales?.length >= 5 ? 0.05 :
                   comparableSales?.length >= 3 ? 0.07 : 0.1;
 
     const estimate = {
@@ -165,7 +168,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('Erreur:', error);
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         error: error instanceof Error ? error.message : 'Une erreur est survenue'
       }),
       {
@@ -183,11 +186,11 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   const R = 6371; // Rayon de la Terre en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
+  const a =
     Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2); 
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return R * c;
 }
 
