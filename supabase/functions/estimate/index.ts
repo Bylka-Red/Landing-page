@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
   const log = (message: string, data?: any) => {
     const logEntry = { message, data, timestamp: new Date().toISOString() };
     debugLogs.push(logEntry);
-    console.log(message, data);
+    console.log(`[DEBUG] ${message}`, data);
   };
 
   try {
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     }
 
     const geocodeData = await geocodeResponse.json();
-    log('Données de géocodage:', geocodeData);
+    log('Données de géocodage complètes:', geocodeData);
     
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
@@ -65,42 +65,47 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées obtenues:', { latitude, longitude });
 
-    // Extraction du code postal
+    // Extraction du code postal et de la ville
     const postalCode = propertyData.address.match(/\d{5}/)?.[0];
-    log('Code postal:', postalCode);
+    log('Code postal extrait:', postalCode);
 
-    // Première requête : tous les biens dans le code postal
-    const { data: allSalesInArea, error: initialError } = await supabase
+    // Recherche des biens dans la base de données
+    const { data: allSalesInArea, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
       .ilike('Adresse', `%${postalCode}%`);
 
-    if (initialError) {
-      log('Erreur Supabase:', initialError);
+    if (dbError) {
+      log('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    log('Ventes trouvées dans le secteur:', allSalesInArea?.length);
+    log('Nombre total de ventes dans le secteur:', allSalesInArea?.length);
+    log('Premières ventes trouvées:', allSalesInArea?.slice(0, 5));
 
     // Filtrage des résultats par distance et surface
     const comparableSales = allSalesInArea?.filter(sale => {
       const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
       const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
       
-      return distance <= 2 && surfaceRatio >= 0.6 && surfaceRatio <= 1.4;
+      const isComparable = distance <= 2 && surfaceRatio >= 0.6 && surfaceRatio <= 1.4;
+      
+      if (isComparable) {
+        log('Vente comparable trouvée:', {
+          adresse: sale.Adresse,
+          distance: distance.toFixed(2) + ' km',
+          surface: sale['Surface reelle bati'] + ' m²',
+          prix: sale['Valeur fonciere'] + ' €',
+          date: sale['Date mutation'],
+          coordonnees: { lat: sale.Latitude, lng: sale.Longitude }
+        });
+      }
+      
+      return isComparable;
     });
 
-    log('Ventes comparables après filtrage:', {
-      nombre: comparableSales?.length,
-      details: comparableSales?.map(sale => ({
-        adresse: sale.Adresse,
-        surface: sale['Surface reelle bati'],
-        prix: sale['Valeur fonciere'],
-        distance: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude),
-        coordonnees: { lat: sale.Latitude, lng: sale.Longitude }
-      }))
-    });
+    log('Nombre de ventes comparables après filtrage:', comparableSales?.length);
 
     // Calcul du prix
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
@@ -122,6 +127,9 @@ Deno.serve(async (req) => {
       ) / (totalWeight || 1);
 
       estimatedPrice = weightedAvgPrice * propertyData.livingArea;
+      log('Prix calculé basé sur les ventes comparables:', estimatedPrice);
+    } else {
+      log('Aucune vente comparable trouvée, utilisation du prix moyen par défaut');
     }
 
     // Ajustements selon l'état
@@ -163,6 +171,7 @@ Deno.serve(async (req) => {
       }
     );
   } catch (error) {
+    log('Erreur:', error instanceof Error ? error.message : 'Erreur inconnue');
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Une erreur est survenue',
