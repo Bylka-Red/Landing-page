@@ -65,74 +65,135 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées obtenues:', { latitude, longitude });
 
-    // Extraction du code postal (plus robuste)
-    const postalCodeMatch = propertyData.address.match(/(\d{5})/);
-    const postalCode = postalCodeMatch ? postalCodeMatch[0] : null;
-    
-    if (!postalCode) {
-      throw new Error('Impossible d\'extraire le code postal de l\'adresse');
-    }
-    
+    // Extraction du code postal et de la rue pour une meilleure recherche
+    const postalCode = propertyData.address.match(/\d{5}/)?.[0] || '';
     log('Code postal extrait:', postalCode);
+    
+    // Extraction du numéro et du nom de rue (sans le code postal et la ville)
+    const addressParts = propertyData.address.split(/\s+\d{5}\s+/);
+    const streetAddress = addressParts[0] || '';
+    log('Adresse de rue extraite:', streetAddress);
 
-    // Recherche des biens dans la base de données
-    // Nouvelle requête améliorée qui cherche:
-    // 1. Les adresses contenant " CODE_POSTAL" (espace avant)
-    // 2. Les adresses contenant "CODE_POSTAL " (espace après)
-    // 3. Les adresses contenant le code postal seul
+    // 1. Recherche par adresse exacte d'abord
+    const { data: exactAddressMatches, error: exactAddressError } = await supabase
+      .from('dvf_idf')
+      .select('*')
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .ilike('Adresse', `%${propertyData.address}%`);
+      
+    if (exactAddressError) {
+      log('Erreur lors de la recherche par adresse exacte:', exactAddressError);
+    } else {
+      log('Correspondances d\'adresse exacte trouvées:', exactAddressMatches?.length || 0);
+    }
+
+    // 2. Recherche des biens dans la base de données avec une requête plus large
     const { data: allSalesInArea, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
-      .or(`Adresse.ilike.% ${postalCode}%,Adresse.ilike.%${postalCode} %,Adresse.ilike.%${postalCode}%`);
-    
+      .ilike('Adresse', `%${postalCode}%`);
+
     if (dbError) {
       log('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
+    // 3. Si on a le numéro et la rue, rechercher par numéro et rue
+    let streetMatches = [];
+    if (streetAddress) {
+      // Tenter d'extraire le numéro de l'adresse
+      const streetNumber = streetAddress.match(/^\d+/)?.[0];
+      // Tenter d'extraire le nom de la rue (sans le numéro)
+      const streetName = streetAddress.replace(/^\d+\s+/, '');
+      
+      if (streetNumber && streetName) {
+        log('Recherche par numéro et rue:', { streetNumber, streetName });
+        
+        // Filtrer manuellement les résultats pour trouver des correspondances de rue
+        streetMatches = allSalesInArea?.filter(sale => {
+          const saleStreetAddress = sale.Adresse.split(/\s+\d{5}\s+/)[0] || '';
+          return saleStreetAddress.includes(streetName);
+        }) || [];
+        
+        log('Correspondances de rue trouvées:', streetMatches.length);
+      }
+    }
+
     log('Nombre total de ventes dans le secteur:', allSalesInArea?.length);
-    log('Exemples de ventes trouvées:', allSalesInArea?.slice(0, 5).map(sale => ({
-      adresse: sale.Adresse,
-      type: sale['Type local'],
-      surface: sale['Surface reelle bati']
-    })));
+    if (allSalesInArea?.length > 0) {
+      log('Premières ventes trouvées:', allSalesInArea?.slice(0, 5));
+    }
 
     // Filtrage des résultats avec des critères plus souples
-    const comparableSales = allSalesInArea?.filter(sale => {
-      // Vérification que les coordonnées existent
-      if (!sale.Latitude || !sale.Longitude) return false;
-      
-      const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
-      const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
-      
-      // Critères plus souples pour trouver des biens comparables
-      const isComparable = distance <= 2 && surfaceRatio >= 0.5 && surfaceRatio <= 1.5;
-      
-      if (isComparable) {
-        log('Vente comparable trouvée:', {
-          adresse: sale.Adresse,
-          distance: distance.toFixed(2) + ' km',
-          surface: sale['Surface reelle bati'] + ' m²',
-          prix: sale['Valeur fonciere'] + ' €',
-          date: sale['Date mutation'],
-          coordonnees: { lat: sale.Latitude, lng: sale.Longitude }
-        });
-      }
-      
-      return isComparable;
-    });
-
+    const rejectedSales: Array<{sale: any, reason: string}> = [];
+    
+    // Vérifier d'abord les correspondances exactes d'adresse
+    let comparableSales = exactAddressMatches || [];
+    
+    // Si aucune correspondance exacte, utiliser les filtres géographiques
+    if (!comparableSales.length) {
+      comparableSales = allSalesInArea?.filter(sale => {
+        // Vérifier si les coordonnées sont disponibles
+        if (!sale.Latitude || !sale.Longitude) {
+          rejectedSales.push({sale, reason: "Coordonnées manquantes"});
+          return false;
+        }
+        
+        // Calculer la distance
+        const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
+        
+        // Si la distance est trop grande, rejeter
+        if (distance > 3) { // Augmenté à 3 km au lieu de 2
+          rejectedSales.push({
+            sale, 
+            reason: `Distance trop grande: ${distance.toFixed(2)} km`
+          });
+          return false;
+        }
+        
+        // Calculer le ratio de surface
+        const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
+        
+        // Si le ratio de surface est hors limites, rejeter
+        if (surfaceRatio < 0.4 || surfaceRatio > 1.6) { // Critères élargis
+          rejectedSales.push({
+            sale, 
+            reason: `Ratio de surface inadéquat: ${surfaceRatio.toFixed(2)}`
+          });
+          return false;
+        }
+        
+        // Critères plus souples pour trouver des biens comparables
+        const isComparable = true;
+        
+        if (isComparable) {
+          log('Vente comparable trouvée:', {
+            adresse: sale.Adresse,
+            distance: distance.toFixed(2) + ' km',
+            surface: sale['Surface reelle bati'] + ' m²',
+            prix: sale['Valeur fonciere'] + ' €',
+            date: sale['Date mutation'],
+            coordonnees: { lat: sale.Latitude, lng: sale.Longitude }
+          });
+        }
+        
+        return isComparable;
+      }) || [];
+    }
+    
+    // Log des ventes rejetées pour le débogage
+    log('Ventes rejetées:', rejectedSales.slice(0, 10));
     log('Nombre de ventes comparables après filtrage:', comparableSales?.length);
 
-    // Calcul du prix (reste inchangé)
+    // Calcul du prix
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
 
     if (comparableSales && comparableSales.length > 0) {
       const weightedPrices = comparableSales.map(sale => {
         const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
-        const weight = Math.max(0.1, 1 - (distance / 2));
+        const weight = Math.max(0.1, 1 - (distance / 3)); // Ajusté pour la distance max de 3km
         return {
           price: sale['Valeur fonciere'] / sale['Surface reelle bati'],
           weight
@@ -150,7 +211,7 @@ Deno.serve(async (req) => {
       log('Aucune vente comparable trouvée, utilisation du prix moyen par défaut');
     }
 
-    // Ajustements selon l'état (reste inchangé)
+    // Ajustements selon l'état
     const conditionMultipliers = {
       'À rénover': 0.8,
       'Travaux à prévoir': 0.9,
@@ -206,17 +267,31 @@ Deno.serve(async (req) => {
   }
 });
 
-// Les fonctions calculateDistance et calculateConfidenceScore restent identiques
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Rayon de la Terre en km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
+  if (!lat1 || !lon1 || !lat2 || !lon2) {
+    return 999; // Valeur élevée si coordonnées manquantes
+  }
+  
+  // Conversion des coordonnées de degrés à radians
+  const radLat1 = lat1 * Math.PI / 180;
+  const radLon1 = lon1 * Math.PI / 180;
+  const radLat2 = lat2 * Math.PI / 180;
+  const radLon2 = lon2 * Math.PI / 180;
+  
+  // Rayon de la Terre en km
+  const R = 6371;
+  
+  // Formule de haversine pour une meilleure précision
+  const dLat = radLat2 - radLat1;
+  const dLon = radLon2 - radLon1;
   const a = 
     Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2); 
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-  return R * c;
+    Math.cos(radLat1) * Math.cos(radLat2) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c;
+  
+  return distance;
 }
 
 function calculateConfidenceScore(numComparables: number): number {
