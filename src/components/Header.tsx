@@ -1,5 +1,6 @@
 import React from 'react';
 import { Phone, Timer } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 interface HeaderProps {
   onEstimateClick: () => void;
@@ -11,7 +12,9 @@ export function Header({ onEstimateClick }: HeaderProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex-shrink-0">
-            <span className="text-lg text-gray-700">2R IMMOBILIER</span>
+            <Link to="/" className="text-lg text-gray-700 hover:text-[#0b8043] transition-colors">
+              2R IMMOBILIER
+            </Link>
           </div>
           
           <div className="flex items-center gap-4">

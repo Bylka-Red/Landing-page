@@ -43,8 +43,8 @@ export function OwnershipStep({ onSubmit }: OwnershipStepProps) {
               Êtes-vous propriétaire du bien ?
             </label>
           </div>
-          <div className="space-y-2">
-            <label className="flex items-center space-x-2 p-2 border-2 border-gray-200 rounded-md hover:border-[#0b8043] transition-colors cursor-pointer">
+          <div className="flex space-x-4">
+            <label className="flex items-center space-x-2">
               <input
                 type="radio"
                 checked={ownership.isOwner}
@@ -53,7 +53,7 @@ export function OwnershipStep({ onSubmit }: OwnershipStepProps) {
               />
               <span className="text-sm text-gray-700">Oui</span>
             </label>
-            <label className="flex items-center space-x-2 p-2 border-2 border-gray-200 rounded-md hover:border-[#0b8043] transition-colors cursor-pointer">
+            <label className="flex items-center space-x-2">
               <input
                 type="radio"
                 checked={!ownership.isOwner}
