@@ -35,7 +35,6 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
   const [isLoading, setIsLoading] = React.useState(true);
   const [estimation, setEstimation] = React.useState<EstimationData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const fetchEstimation = async () => {
@@ -66,11 +65,6 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         if (!response.ok) {
           const errorData = await response.json();
           console.error('Réponse d\'erreur du serveur:', errorData);
-          
-          if (errorData.debug_logs) {
-            console.log('Logs de débogage:', errorData.debug_logs);
-          }
-          
           throw new Error(errorData.error || `Erreur serveur: ${response.status}`);
         }
 
@@ -79,7 +73,6 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         
         if (data.debug_logs) {
           console.log('Logs de débogage:', data.debug_logs);
-          setDebugInfo(JSON.stringify(data.debug_logs, null, 2));
         }
         
         setEstimation(data);
@@ -117,12 +110,6 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
       <div className="text-center py-6">
         <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-4" />
         <p className="text-red-600 mb-4 font-medium">{error}</p>
-        {process.env.NODE_ENV === 'development' && debugInfo && (
-          <details className="mb-4 text-left bg-gray-100 p-3 rounded-md">
-            <summary className="cursor-pointer text-sm text-gray-700 font-medium">Détails techniques</summary>
-            <pre className="mt-2 text-xs overflow-auto max-h-40">{debugInfo}</pre>
-          </details>
-        )}
         <div className="flex space-x-3 justify-center">
           <button
             onClick={onComplete}
@@ -209,12 +196,21 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         <p className="text-sm text-gray-600">{propertyData.address}</p>
       </div>
 
-      {process.env.NODE_ENV === 'development' && estimation.debug_logs && (
+      {estimation.debug_logs && (
         <details className="bg-gray-50 p-4 rounded-md">
-          <summary className="cursor-pointer font-medium text-gray-700">Logs de débogage</summary>
-          <pre className="mt-4 text-xs overflow-auto max-h-96 bg-gray-100 p-4 rounded">
-            {JSON.stringify(estimation.debug_logs, null, 2)}
-          </pre>
+          <summary className="cursor-pointer font-medium text-gray-700">Détails de l'estimation</summary>
+          <div className="mt-4 space-y-4">
+            {estimation.debug_logs.map((log, index) => (
+              <div key={index} className="text-sm">
+                <p className="font-medium">{log.message}</p>
+                {log.data && (
+                  <pre className="mt-1 p-2 bg-gray-100 rounded overflow-auto text-xs">
+                    {JSON.stringify(log.data, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
         </details>
       )}
 
