@@ -65,27 +65,44 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées obtenues:', { latitude, longitude });
 
-    // Extraction du code postal et normalisation de l'adresse
-    const postalCode = propertyData.address.match(/\d{5}/)?.[0];
+    // Extraction du code postal (plus robuste)
+    const postalCodeMatch = propertyData.address.match(/(\d{5})/);
+    const postalCode = postalCodeMatch ? postalCodeMatch[0] : null;
+    
+    if (!postalCode) {
+      throw new Error('Impossible d\'extraire le code postal de l\'adresse');
+    }
+    
     log('Code postal extrait:', postalCode);
 
-    // Recherche des biens dans la base de données avec une requête plus large
+    // Recherche des biens dans la base de données
+    // Nouvelle requête améliorée qui cherche:
+    // 1. Les adresses contenant " CODE_POSTAL" (espace avant)
+    // 2. Les adresses contenant "CODE_POSTAL " (espace après)
+    // 3. Les adresses contenant le code postal seul
     const { data: allSalesInArea, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
-      .ilike('Adresse', `%${postalCode}%`);
-
+      .or(`Adresse.ilike.% ${postalCode}%,Adresse.ilike.%${postalCode} %,Adresse.ilike.%${postalCode}%`);
+    
     if (dbError) {
       log('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
     log('Nombre total de ventes dans le secteur:', allSalesInArea?.length);
-    log('Premières ventes trouvées:', allSalesInArea?.slice(0, 5));
+    log('Exemples de ventes trouvées:', allSalesInArea?.slice(0, 5).map(sale => ({
+      adresse: sale.Adresse,
+      type: sale['Type local'],
+      surface: sale['Surface reelle bati']
+    })));
 
     // Filtrage des résultats avec des critères plus souples
     const comparableSales = allSalesInArea?.filter(sale => {
+      // Vérification que les coordonnées existent
+      if (!sale.Latitude || !sale.Longitude) return false;
+      
       const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
       const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
       
@@ -108,7 +125,7 @@ Deno.serve(async (req) => {
 
     log('Nombre de ventes comparables après filtrage:', comparableSales?.length);
 
-    // Calcul du prix
+    // Calcul du prix (reste inchangé)
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
 
@@ -133,7 +150,7 @@ Deno.serve(async (req) => {
       log('Aucune vente comparable trouvée, utilisation du prix moyen par défaut');
     }
 
-    // Ajustements selon l'état
+    // Ajustements selon l'état (reste inchangé)
     const conditionMultipliers = {
       'À rénover': 0.8,
       'Travaux à prévoir': 0.9,
@@ -189,6 +206,7 @@ Deno.serve(async (req) => {
   }
 });
 
+// Les fonctions calculateDistance et calculateConfidenceScore restent identiques
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371; // Rayon de la Terre en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
