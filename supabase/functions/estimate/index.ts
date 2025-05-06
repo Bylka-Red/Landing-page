@@ -65,11 +65,11 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées obtenues:', { latitude, longitude });
 
-    // Extraction du code postal et de la ville
+    // Extraction du code postal et normalisation de l'adresse
     const postalCode = propertyData.address.match(/\d{5}/)?.[0];
     log('Code postal extrait:', postalCode);
 
-    // Recherche des biens dans la base de données
+    // Recherche des biens dans la base de données avec une requête plus large
     const { data: allSalesInArea, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
@@ -84,12 +84,13 @@ Deno.serve(async (req) => {
     log('Nombre total de ventes dans le secteur:', allSalesInArea?.length);
     log('Premières ventes trouvées:', allSalesInArea?.slice(0, 5));
 
-    // Filtrage des résultats par distance et surface
+    // Filtrage des résultats avec des critères plus souples
     const comparableSales = allSalesInArea?.filter(sale => {
       const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
       const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
       
-      const isComparable = distance <= 2 && surfaceRatio >= 0.6 && surfaceRatio <= 1.4;
+      // Critères plus souples pour trouver des biens comparables
+      const isComparable = distance <= 2 && surfaceRatio >= 0.5 && surfaceRatio <= 1.5;
       
       if (isComparable) {
         log('Vente comparable trouvée:', {
