@@ -44,67 +44,60 @@ Deno.serve(async (req) => {
     const geocodeResponse = await fetch(
       `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
     );
-
+    
     if (!geocodeResponse.ok) {
       throw new Error('Erreur lors de la géolocalisation');
     }
 
     const geocodeData = await geocodeResponse.json();
-    console.log('Données de géocodage:', geocodeData);
-
+    console.log('Données de géocodage complètes:', geocodeData);
+    
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
-    console.log('Coordonnées obtenues par géocodage:', { latitude, longitude });
+    console.log('Coordonnées recherchées:', { latitude, longitude });
 
-    // Extraction du numéro de rue et du code postal
-    const addressParts = propertyData.address.match(/(\d+).*?(\d{5})/);
-    const streetNumber = addressParts?.[1];
-    const postalCode = addressParts?.[2];
+    // Extraction du code postal
+    const postalCode = propertyData.address.match(/\d{5}/)?.[0];
+    console.log('Code postal:', postalCode);
 
-    console.log('Informations extraites:', { streetNumber, postalCode });
-
-    // Recherche plus large avec uniquement le code postal
+    // Recherche en deux étapes
+    // 1. D'abord par code postal et type de bien
     let query = supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
       .ilike('Adresse', `%${postalCode}%`);
 
-    // Ajout des critères de surface avec une marge plus large
-    const surfaceMargin = 0.4; // 40% de marge
-    query = query
-      .gte('Surface reelle bati', propertyData.livingArea * (1 - surfaceMargin))
-      .lte('Surface reelle bati', propertyData.livingArea * (1 + surfaceMargin));
+    const { data: allSalesInArea, error: initialError } = await query;
 
-    // Recherche dans un rayon plus large (5km)
-    const searchRadius = 0.05; // environ 5 km
-    query = query
-      .gte('Latitude', latitude - searchRadius)
-      .lte('Latitude', latitude + searchRadius)
-      .gte('Longitude', longitude - searchRadius)
-      .lte('Longitude', longitude + searchRadius);
-
-    // Log de la requête Supabase
-    console.log('Requête Supabase:', query);
-
-    const { data: comparableSales, error: dbError } = await query;
-
-    if (dbError) {
-      console.error('Erreur Supabase:', dbError);
+    if (initialError) {
+      console.error('Erreur initiale Supabase:', initialError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    console.log('Ventes trouvées:', comparableSales?.length);
-    console.log('Détails des ventes:', comparableSales?.map(sale => ({
-      adresse: sale.Adresse,
-      surface: sale['Surface reelle bati'],
-      prix: sale['Valeur fonciere'],
-      date: sale['Date mutation'],
-      distance: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude)
-    })));
+    console.log('Nombre total de ventes dans la zone:', allSalesInArea?.length);
+
+    // 2. Filtrage des résultats par distance et surface
+    const comparableSales = allSalesInArea?.filter(sale => {
+      const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
+      const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
+      
+      return distance <= 2 && surfaceRatio >= 0.6 && surfaceRatio <= 1.4;
+    });
+
+    console.log('Ventes comparables trouvées:', comparableSales?.length);
+    if (comparableSales?.length) {
+      console.log('Détails des ventes:', comparableSales.map(sale => ({
+        adresse: sale.Adresse,
+        surface: sale['Surface reelle bati'],
+        prix: sale['Valeur fonciere'],
+        distance: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude),
+        coordonnees: { lat: sale.Latitude, lng: sale.Longitude }
+      })));
+    }
 
     // Calcul du prix avec pondération par distance
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
@@ -113,7 +106,7 @@ Deno.serve(async (req) => {
     if (comparableSales && comparableSales.length > 0) {
       const weightedPrices = comparableSales.map(sale => {
         const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
-        const weight = Math.max(0.1, 1 - (distance / 5)); // Distance maximale de 5km
+        const weight = Math.max(0.1, 1 - (distance / 2));
         return {
           price: sale['Valeur fonciere'] / sale['Surface reelle bati'],
           weight
@@ -142,7 +135,7 @@ Deno.serve(async (req) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Calcul de la marge d'erreur
-    const margin = comparableSales?.length >= 5 ? 0.05 :
+    const margin = comparableSales?.length >= 5 ? 0.05 : 
                   comparableSales?.length >= 3 ? 0.07 : 0.1;
 
     const estimate = {
@@ -168,7 +161,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('Erreur:', error);
     return new Response(
-      JSON.stringify({
+      JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Une erreur est survenue'
       }),
       {
@@ -186,11 +179,11 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   const R = 6371; // Rayon de la Terre en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
+  const a = 
     Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
   return R * c;
 }
 
