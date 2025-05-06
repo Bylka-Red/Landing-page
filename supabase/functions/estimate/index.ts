@@ -9,7 +9,6 @@ interface PropertyData {
   floor?: number;
   hasElevator?: boolean;
   condition: string;
-  landArea?: number;
 }
 
 const corsHeaders = {
@@ -23,9 +22,16 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const debugLogs: any[] = [];
+  const log = (message: string, data?: any) => {
+    const logEntry = { message, data, timestamp: new Date().toISOString() };
+    debugLogs.push(logEntry);
+    console.log(message, data);
+  };
+
   try {
     const propertyData: PropertyData = await req.json();
-    console.log('Données reçues:', propertyData);
+    log('Données reçues:', propertyData);
 
     // Validation des données requises
     if (!propertyData.address) throw new Error('Adresse manquante');
@@ -50,37 +56,34 @@ Deno.serve(async (req) => {
     }
 
     const geocodeData = await geocodeResponse.json();
-    console.log('Données de géocodage complètes:', geocodeData);
+    log('Données de géocodage:', geocodeData);
     
     if (!geocodeData.features?.[0]) {
       throw new Error('Adresse non trouvée');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
-    console.log('Coordonnées recherchées:', { latitude, longitude });
+    log('Coordonnées obtenues:', { latitude, longitude });
 
     // Extraction du code postal
     const postalCode = propertyData.address.match(/\d{5}/)?.[0];
-    console.log('Code postal:', postalCode);
+    log('Code postal:', postalCode);
 
-    // Recherche en deux étapes
-    // 1. D'abord par code postal et type de bien
-    let query = supabase
+    // Première requête : tous les biens dans le code postal
+    const { data: allSalesInArea, error: initialError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
       .ilike('Adresse', `%${postalCode}%`);
 
-    const { data: allSalesInArea, error: initialError } = await query;
-
     if (initialError) {
-      console.error('Erreur initiale Supabase:', initialError);
+      log('Erreur Supabase:', initialError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    console.log('Nombre total de ventes dans la zone:', allSalesInArea?.length);
+    log('Ventes trouvées dans le secteur:', allSalesInArea?.length);
 
-    // 2. Filtrage des résultats par distance et surface
+    // Filtrage des résultats par distance et surface
     const comparableSales = allSalesInArea?.filter(sale => {
       const distance = calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude);
       const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
@@ -88,18 +91,18 @@ Deno.serve(async (req) => {
       return distance <= 2 && surfaceRatio >= 0.6 && surfaceRatio <= 1.4;
     });
 
-    console.log('Ventes comparables trouvées:', comparableSales?.length);
-    if (comparableSales?.length) {
-      console.log('Détails des ventes:', comparableSales.map(sale => ({
+    log('Ventes comparables après filtrage:', {
+      nombre: comparableSales?.length,
+      details: comparableSales?.map(sale => ({
         adresse: sale.Adresse,
         surface: sale['Surface reelle bati'],
         prix: sale['Valeur fonciere'],
         distance: calculateDistance(latitude, longitude, sale.Latitude, sale.Longitude),
         coordonnees: { lat: sale.Latitude, lng: sale.Longitude }
-      })));
-    }
+      }))
+    });
 
-    // Calcul du prix avec pondération par distance
+    // Calcul du prix
     const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
     let estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
 
@@ -146,7 +149,8 @@ Deno.serve(async (req) => {
         max: Math.round(adjustedPrice * (1 + margin))
       },
       comparable_sales: comparableSales?.length || 0,
-      confidence_score: calculateConfidenceScore(comparableSales?.length || 0)
+      confidence_score: calculateConfidenceScore(comparableSales?.length || 0),
+      debug_logs: debugLogs
     };
 
     return new Response(
@@ -159,10 +163,10 @@ Deno.serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Erreur:', error);
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Une erreur est survenue'
+        error: error instanceof Error ? error.message : 'Une erreur est survenue',
+        debug_logs: debugLogs
       }),
       {
         status: 400,

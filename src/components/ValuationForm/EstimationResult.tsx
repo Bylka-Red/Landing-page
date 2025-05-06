@@ -24,6 +24,11 @@ interface EstimationData {
   };
   comparable_sales: number;
   confidence_score: number;
+  debug_logs?: Array<{
+    message: string;
+    data?: any;
+    timestamp: string;
+  }>;
 }
 
 export function EstimationResult({ onComplete, propertyData }: EstimationResultProps) {
@@ -48,7 +53,6 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
 
         console.log('Envoi de la requête avec les données:', requestData);
         
-        // Utilisation de l'URL relative pour la fonction
         const response = await fetch('/.netlify/functions/estimate', {
           method: 'POST',
           headers: {
@@ -60,25 +64,28 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         console.log('Statut de la réponse:', response.status);
         
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Réponse d\'erreur du serveur:', errorText);
+          const errorData = await response.json();
+          console.error('Réponse d\'erreur du serveur:', errorData);
           
-          try {
-            const errorJson = JSON.parse(errorText);
-            throw new Error(errorJson.error || `Erreur serveur: ${response.status}`);
-          } catch (e) {
-            throw new Error(`Erreur serveur: ${response.status}`);
+          if (errorData.debug_logs) {
+            console.log('Logs de débogage:', errorData.debug_logs);
           }
+          
+          throw new Error(errorData.error || `Erreur serveur: ${response.status}`);
         }
 
         const data = await response.json();
         console.log('Données reçues de l\'API:', data);
+        
+        if (data.debug_logs) {
+          console.log('Logs de débogage:', data.debug_logs);
+          setDebugInfo(JSON.stringify(data.debug_logs, null, 2));
+        }
+        
         setEstimation(data);
       } catch (err) {
         console.error('Erreur détaillée:', err);
         setError(err instanceof Error ? err.message : 'Une erreur est survenue lors de l\'estimation');
-        // Stockage des informations de débogage pour affichage en mode développement
-        setDebugInfo(JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
       } finally {
         setIsLoading(false);
       }
@@ -201,6 +208,15 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         </div>
         <p className="text-sm text-gray-600">{propertyData.address}</p>
       </div>
+
+      {process.env.NODE_ENV === 'development' && estimation.debug_logs && (
+        <details className="bg-gray-50 p-4 rounded-md">
+          <summary className="cursor-pointer font-medium text-gray-700">Logs de débogage</summary>
+          <pre className="mt-4 text-xs overflow-auto max-h-96 bg-gray-100 p-4 rounded">
+            {JSON.stringify(estimation.debug_logs, null, 2)}
+          </pre>
+        </details>
+      )}
 
       <div className="bg-gray-50 p-4 rounded-md border-2 border-gray-200">
         <div className="flex items-start space-x-2">
