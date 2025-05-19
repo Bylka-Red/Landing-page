@@ -65,64 +65,76 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées de référence:', { latitude, longitude });
 
-    // Récupérer d'abord toutes les ventes du même type de bien
-    const { data: allSales, error: dbError } = await supabase
+    // Récupération des ventes comparables avec une requête plus large
+    const { data: comparableSales, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
-      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement');
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .gte('Surface reelle bati', propertyData.livingArea * 0.7)
+      .lte('Surface reelle bati', propertyData.livingArea * 1.3)
+      .gte('Latitude', latitude - 0.05) // Augmentation du rayon de recherche
+      .lte('Latitude', latitude + 0.05)
+      .gte('Longitude', longitude - 0.05)
+      .lte('Longitude', longitude + 0.05);
 
     if (dbError) {
       log('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    log('Nombre total de ventes récupérées:', allSales?.length || 0);
+    log('Ventes comparables brutes:', {
+      total: comparableSales?.length || 0,
+      criteres: {
+        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
+        surfaceMin: propertyData.livingArea * 0.7,
+        surfaceMax: propertyData.livingArea * 1.3,
+        latitudeMin: latitude - 0.05,
+        latitudeMax: latitude + 0.05,
+        longitudeMin: longitude - 0.05,
+        longitudeMax: longitude + 0.05
+      },
+      ventes: comparableSales?.map(sale => ({
+        adresse: sale.Adresse,
+        type: sale['Type local'],
+        surface: sale['Surface reelle bati'],
+        prix: sale['Valeur fonciere'],
+        date: sale['Date mutation']
+      }))
+    });
 
-    // Filtrer les ventes avec des coordonnées valides
-    const validSales = allSales?.filter(sale => 
-      sale.Latitude !== null && 
-      sale.Longitude !== null && 
-      !isNaN(sale.Latitude) && 
-      !isNaN(sale.Longitude)
-    ) || [];
+    // Filtrer et trier les ventes par distance
+    const salesWithDistance = (comparableSales || []).map(sale => {
+      const distance = calculateDistance(
+        latitude,
+        longitude,
+        sale.Latitude,
+        sale.Longitude
+      );
+      return { ...sale, distance };
+    });
 
-    log('Ventes avec coordonnées valides:', validSales.length);
+    // Trier par distance et prendre les 10 plus proches
+    const nearestSales = salesWithDistance
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 10);
 
-    // Calculer les distances et filtrer les biens comparables
-    const comparableSales = validSales
-      .map(sale => {
-        const distance = calculateDistance(
-          latitude,
-          longitude,
-          sale.Latitude,
-          sale.Longitude
-        );
-        return { ...sale, distance };
-      })
-      .filter(sale => {
-        // Filtrer par distance (2km) et surface (±30%)
-        const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
-        return sale.distance <= 2 && surfaceRatio >= 0.7 && surfaceRatio <= 1.3;
-      })
-      .sort((a, b) => a.distance - b.distance);
-
-    log('Ventes comparables trouvées:', {
-      total: comparableSales.length,
-      details: comparableSales.map(sale => ({
+    log('Ventes les plus proches:', {
+      total: nearestSales.length,
+      ventes: nearestSales.map(sale => ({
         adresse: sale.Adresse,
         distance: `${sale.distance.toFixed(2)} km`,
-        prix: `${sale['Valeur fonciere']} €`,
-        surface: `${sale['Surface reelle bati']} m²`,
+        prix: sale['Valeur fonciere'],
+        surface: sale['Surface reelle bati'],
         date: sale['Date mutation']
       }))
     });
 
     // Calcul du prix
     let estimatedPrice;
-    if (comparableSales.length > 0) {
+    if (nearestSales.length > 0) {
       // Calcul de la moyenne pondérée par la distance
-      const weights = comparableSales.map(sale => ({
-        weight: 1 / Math.pow(sale.distance + 0.1, 2), // Pondération inversement proportionnelle au carré de la distance
+      const weights = nearestSales.map(sale => ({
+        weight: 1 / Math.pow(sale.distance + 0.1, 2),
         pricePerM2: sale['Valeur fonciere'] / sale['Surface reelle bati']
       }));
 
@@ -158,8 +170,8 @@ Deno.serve(async (req) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Calcul de la marge d'erreur
-    const margin = comparableSales.length >= 5 ? 0.05 : 
-                  comparableSales.length >= 3 ? 0.07 : 0.1;
+    const margin = nearestSales.length >= 5 ? 0.05 : 
+                  nearestSales.length >= 3 ? 0.07 : 0.1;
 
     const estimate = {
       average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
@@ -168,8 +180,8 @@ Deno.serve(async (req) => {
         min: Math.round(adjustedPrice * (1 - margin)),
         max: Math.round(adjustedPrice * (1 + margin))
       },
-      comparable_sales: comparableSales.length,
-      confidence_score: calculateConfidenceScore(comparableSales.length),
+      comparable_sales: nearestSales.length,
+      confidence_score: calculateConfidenceScore(nearestSales.length),
       debug_logs: debugLogs
     };
 
