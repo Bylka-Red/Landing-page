@@ -65,42 +65,50 @@ Deno.serve(async (req) => {
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées de référence:', { latitude, longitude });
 
-    // Recherche de biens comparables avec une requête SQL directe pour plus de précision
-    const { data: comparableSales, error: dbError } = await supabase
+    // Récupérer d'abord toutes les ventes du même type de bien
+    const { data: allSales, error: dbError } = await supabase
       .from('dvf_idf')
       .select('*')
-      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
-      .gte('Surface reelle bati', propertyData.livingArea * 0.7)
-      .lte('Surface reelle bati', propertyData.livingArea * 1.3)
-      .not('Latitude', 'is', null)
-      .not('Longitude', 'is', null);
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement');
 
     if (dbError) {
       log('Erreur Supabase:', dbError);
       throw new Error('Erreur lors de la récupération des données');
     }
 
-    log('Nombre total de ventes récupérées:', comparableSales?.length || 0);
+    log('Nombre total de ventes récupérées:', allSales?.length || 0);
 
-    // Filtrer les ventes par distance
-    const salesWithDistance = comparableSales?.map(sale => {
-      const distance = calculateDistance(
-        latitude,
-        longitude,
-        sale.Latitude,
-        sale.Longitude
-      );
-      return { ...sale, distance };
-    }) || [];
+    // Filtrer les ventes avec des coordonnées valides
+    const validSales = allSales?.filter(sale => 
+      sale.Latitude !== null && 
+      sale.Longitude !== null && 
+      !isNaN(sale.Latitude) && 
+      !isNaN(sale.Longitude)
+    ) || [];
 
-    // Trier par distance et filtrer ceux dans un rayon de 2km
-    const nearbyComparables = salesWithDistance
-      .filter(sale => sale.distance <= 2)
+    log('Ventes avec coordonnées valides:', validSales.length);
+
+    // Calculer les distances et filtrer les biens comparables
+    const comparableSales = validSales
+      .map(sale => {
+        const distance = calculateDistance(
+          latitude,
+          longitude,
+          sale.Latitude,
+          sale.Longitude
+        );
+        return { ...sale, distance };
+      })
+      .filter(sale => {
+        // Filtrer par distance (2km) et surface (±30%)
+        const surfaceRatio = sale['Surface reelle bati'] / propertyData.livingArea;
+        return sale.distance <= 2 && surfaceRatio >= 0.7 && surfaceRatio <= 1.3;
+      })
       .sort((a, b) => a.distance - b.distance);
 
     log('Ventes comparables trouvées:', {
-      total: nearbyComparables.length,
-      details: nearbyComparables.map(sale => ({
+      total: comparableSales.length,
+      details: comparableSales.map(sale => ({
         adresse: sale.Adresse,
         distance: `${sale.distance.toFixed(2)} km`,
         prix: `${sale['Valeur fonciere']} €`,
@@ -111,25 +119,29 @@ Deno.serve(async (req) => {
 
     // Calcul du prix
     let estimatedPrice;
-    if (nearbyComparables.length > 0) {
+    if (comparableSales.length > 0) {
       // Calcul de la moyenne pondérée par la distance
-      const totalWeight = nearbyComparables.reduce((sum, sale) => {
-        const weight = 1 / (sale.distance + 0.1); // Éviter division par zéro
-        return sum + weight;
-      }, 0);
+      const weights = comparableSales.map(sale => ({
+        weight: 1 / Math.pow(sale.distance + 0.1, 2), // Pondération inversement proportionnelle au carré de la distance
+        pricePerM2: sale['Valeur fonciere'] / sale['Surface reelle bati']
+      }));
 
-      const weightedSum = nearbyComparables.reduce((sum, sale) => {
-        const weight = 1 / (sale.distance + 0.1);
-        const pricePerM2 = sale['Valeur fonciere'] / sale['Surface reelle bati'];
-        return sum + (pricePerM2 * weight);
-      }, 0);
+      const totalWeight = weights.reduce((sum, { weight }) => sum + weight, 0);
+      const weightedPrice = weights.reduce((sum, { weight, pricePerM2 }) => 
+        sum + (pricePerM2 * weight), 0) / totalWeight;
 
-      const averagePricePerM2 = weightedSum / totalWeight;
-      estimatedPrice = averagePricePerM2 * propertyData.livingArea;
+      estimatedPrice = weightedPrice * propertyData.livingArea;
+      
+      log('Calcul du prix:', {
+        prixMoyen: weightedPrice,
+        prixTotal: estimatedPrice,
+        poids: weights
+      });
     } else {
       // Prix par défaut si aucun comparable trouvé
       const defaultPricePerM2 = propertyData.type === 'house' ? 3800 : 4200;
       estimatedPrice = defaultPricePerM2 * propertyData.livingArea;
+      log('Utilisation du prix par défaut:', defaultPricePerM2);
     }
 
     // Ajustements selon l'état
@@ -146,8 +158,8 @@ Deno.serve(async (req) => {
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Calcul de la marge d'erreur
-    const margin = nearbyComparables.length >= 5 ? 0.05 : 
-                  nearbyComparables.length >= 3 ? 0.07 : 0.1;
+    const margin = comparableSales.length >= 5 ? 0.05 : 
+                  comparableSales.length >= 3 ? 0.07 : 0.1;
 
     const estimate = {
       average_price_per_sqm: Math.round(adjustedPrice / propertyData.livingArea),
@@ -156,8 +168,8 @@ Deno.serve(async (req) => {
         min: Math.round(adjustedPrice * (1 - margin)),
         max: Math.round(adjustedPrice * (1 + margin))
       },
-      comparable_sales: nearbyComparables.length,
-      confidence_score: calculateConfidenceScore(nearbyComparables.length),
+      comparable_sales: comparableSales.length,
+      confidence_score: calculateConfidenceScore(comparableSales.length),
       debug_logs: debugLogs
     };
 
