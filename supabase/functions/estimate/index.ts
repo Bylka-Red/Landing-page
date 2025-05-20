@@ -41,57 +41,126 @@ Deno.serve(async (req) => {
     if (!propertyData.condition) throw new Error('État du bien manquant');
 
     // Initialisation de Supabase
-    const supabase = createClient(
-      Deno.env.get('VITE_SUPABASE_URL') || '',
-      Deno.env.get('VITE_SUPABASE_ANON_KEY') || ''
-    );
+    const supabaseUrl = Deno.env.get('VITE_SUPABASE_URL') || '';
+    const supabaseKey = Deno.env.get('VITE_SUPABASE_ANON_KEY') || '';
+    
+    log('Configuration Supabase:', { 
+      url: supabaseUrl ? 'définie' : 'non définie', 
+      key: supabaseKey ? 'définie' : 'non définie'
+    });
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Extraire ville et code postal de l'adresse
+    const addressParts = propertyData.address.split(/,| - /);
+    let city = '';
+    let postalCode = '';
+    
+    // Recherche du code postal dans l'adresse
+    for (const part of addressParts) {
+      const trimmedPart = part.trim();
+      const postalMatch = trimmedPart.match(/\d{5}/);
+      if (postalMatch) {
+        postalCode = postalMatch[0];
+        // Si le code postal est trouvé, la ville est probablement dans la même partie
+        const cityParts = trimmedPart.split(postalCode);
+        if (cityParts.length > 1) {
+          city = cityParts[1].trim();
+        } else if (cityParts.length === 1) {
+          city = cityParts[0].trim();
+        }
+        break;
+      }
+    }
+    
+    // Si la ville n'est pas trouvée avec le code postal, chercher dans la dernière partie
+    if (!city && addressParts.length > 0) {
+      const lastPart = addressParts[addressParts.length - 1].trim();
+      if (!lastPart.match(/^\d{5}$/)) {
+        city = lastPart;
+      }
+    }
+    
+    // On extrait aussi le nom de la rue (première partie de l'adresse généralement)
+    const streetAddress = addressParts[0]?.trim() || '';
+    
+    log('Extraction d\'adresse:', { streetAddress, city, postalCode });
 
     // Géocodage de l'adresse pour obtenir les coordonnées précises
-    const geocodeResponse = await fetch(
-      `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`
-    );
+    const geocodeURL = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(propertyData.address)}&limit=1`;
+    log('URL de géocodage:', geocodeURL);
+    
+    const geocodeResponse = await fetch(geocodeURL);
     
     if (!geocodeResponse.ok) {
-      throw new Error('Erreur lors de la géolocalisation');
+      throw new Error(`Erreur lors de la géolocalisation: ${geocodeResponse.status} ${geocodeResponse.statusText}`);
     }
 
     const geocodeData = await geocodeResponse.json();
-    log('Données de géocodage:', geocodeData);
+    log('Données de géocodage brutes:', geocodeData);
     
     if (!geocodeData.features?.[0]) {
-      throw new Error('Adresse non trouvée');
+      throw new Error('Adresse non trouvée par le service de géocodage');
     }
 
     const [longitude, latitude] = geocodeData.features[0].geometry.coordinates;
     log('Coordonnées de référence:', { latitude, longitude });
 
-    // Extraction du nom de la rue et de la ville pour une recherche textuelle
-    const addressComponents = propertyData.address.split(',');
-    const streetName = addressComponents[0]?.trim() || '';
-    const cityName = addressComponents[addressComponents.length - 1]?.trim() || '';
+    // Tentative directe de recherche du 29 Rue des Bleuets (pour vérifier s'il existe)
+    const similarAddress = streetAddress.replace(/\d+/, '29');
+    log('Recherche directe d\'adresse similaire:', similarAddress);
     
-    log('Composants d\'adresse extraits:', { streetName, cityName });
+    const { data: directMatch, error: directError } = await supabase
+      .from('dvf_idf')
+      .select('*')
+      .ilike('Adresse', `%${similarAddress}%`);
+      
+    if (directError) {
+      log('Erreur lors de la recherche directe:', directError);
+    } else {
+      log('Résultats de la recherche directe:', {
+        found: directMatch?.length || 0,
+        results: directMatch
+      });
+    }
 
-    // Récupération des ventes comparables en deux étapes
-    // Étape 1: Recherche par proximité géographique (large)
+    // Approche 1: Recherche par coordonnées géographiques (rayon élargi)
+    log('Recherche par coordonnées avec rayon de 0.1°');
     const { data: geoSales, error: geoError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
       .gte('Surface reelle bati', propertyData.livingArea * 0.7)
       .lte('Surface reelle bati', propertyData.livingArea * 1.3)
-      .gte('Latitude', latitude - 0.05)
-      .lte('Latitude', latitude + 0.05)
-      .gte('Longitude', longitude - 0.05)
-      .lte('Longitude', longitude + 0.05);
+      .gte('Latitude', latitude - 0.1)
+      .lte('Latitude', latitude + 0.1)
+      .gte('Longitude', longitude - 0.1)
+      .lte('Longitude', longitude + 0.1);
 
     if (geoError) {
       log('Erreur Supabase (recherche géographique):', geoError);
-      throw new Error('Erreur lors de la récupération des données');
+    } else {
+      log('Résultats de recherche géographique:', {
+        found: geoSales?.length || 0,
+        criteria: {
+          type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
+          surfaceMin: propertyData.livingArea * 0.7,
+          surfaceMax: propertyData.livingArea * 1.3,
+          latitudeMin: latitude - 0.1,
+          latitudeMax: latitude + 0.1,
+          longitudeMin: longitude - 0.1,
+          longitudeMax: longitude + 0.1
+        }
+      });
     }
 
-    // Étape 2: Recherche par similarité d'adresse
-    const { data: addressSales, error: addressError } = await supabase
+    // Approche 2: Recherche par nom de rue
+    // On extrait le nom de la rue sans le numéro
+    const streetNameMatch = streetAddress.match(/\d+\s+(.+)/);
+    const streetName = streetNameMatch ? streetNameMatch[1].trim() : streetAddress;
+    
+    log('Recherche par nom de rue:', streetName);
+    const { data: streetSales, error: streetError } = await supabase
       .from('dvf_idf')
       .select('*')
       .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
@@ -99,41 +168,81 @@ Deno.serve(async (req) => {
       .lte('Surface reelle bati', propertyData.livingArea * 1.3)
       .ilike('Adresse', `%${streetName}%`);
 
-    if (addressError) {
-      log('Erreur Supabase (recherche par adresse):', addressError);
-      // On continue même si cette partie échoue
+    if (streetError) {
+      log('Erreur Supabase (recherche par rue):', streetError);
+    } else {
+      log('Résultats de recherche par rue:', {
+        found: streetSales?.length || 0,
+        streetName
+      });
     }
 
-    // Fusion des résultats (éviter les doublons)
+    // Approche 3: Recherche par ville/code postal
+    log('Recherche par ville/code postal:', { city, postalCode });
+    
+    let cityPostalQuery = supabase
+      .from('dvf_idf')
+      .select('*')
+      .eq('Type local', propertyData.type === 'house' ? 'Maison' : 'Appartement')
+      .gte('Surface reelle bati', propertyData.livingArea * 0.7)
+      .lte('Surface reelle bati', propertyData.livingArea * 1.3);
+      
+    if (city) {
+      cityPostalQuery = cityPostalQuery.ilike('Adresse', `%${city}%`);
+    }
+    if (postalCode) {
+      cityPostalQuery = cityPostalQuery.ilike('Adresse', `%${postalCode}%`);
+    }
+    
+    const { data: citySales, error: cityError } = await cityPostalQuery;
+
+    if (cityError) {
+      log('Erreur Supabase (recherche par ville/code postal):', cityError);
+    } else {
+      log('Résultats de recherche par ville/code postal:', {
+        found: citySales?.length || 0,
+        city,
+        postalCode
+      });
+    }
+
+    // Fusion de tous les résultats
     const allSalesMap = new Map();
     
-    // Ajout des ventes par géolocalisation
+    // Ajouter les résultats de chaque recherche
     (geoSales || []).forEach(sale => {
-      allSalesMap.set(sale.id, sale);
+      // On utilise l'ID comme clé pour éviter les doublons
+      // Si la sale n'a pas d'ID, on crée une clé composite
+      const key = sale.id || `${sale.Adresse}-${sale['Date mutation']}-${sale['Valeur fonciere']}`;
+      allSalesMap.set(key, sale);
     });
     
-    // Ajout des ventes par adresse
-    (addressSales || []).forEach(sale => {
-      if (!allSalesMap.has(sale.id)) {
-        allSalesMap.set(sale.id, sale);
-      }
+    (streetSales || []).forEach(sale => {
+      const key = sale.id || `${sale.Adresse}-${sale['Date mutation']}-${sale['Valeur fonciere']}`;
+      allSalesMap.set(key, sale);
+    });
+    
+    (citySales || []).forEach(sale => {
+      const key = sale.id || `${sale.Adresse}-${sale['Date mutation']}-${sale['Valeur fonciere']}`;
+      allSalesMap.set(key, sale);
     });
     
     const allSales = Array.from(allSalesMap.values());
     
-    log('Ventes comparables brutes (combinées):', {
+    log('Résultats combinés:', {
       total: allSales.length,
-      criteres: {
-        type: propertyData.type === 'house' ? 'Maison' : 'Appartement',
-        surfaceMin: propertyData.livingArea * 0.7,
-        surfaceMax: propertyData.livingArea * 1.3,
-      },
-      recherche_geo: geoSales?.length || 0,
-      recherche_adresse: addressSales?.length || 0
+      geo: geoSales?.length || 0,
+      street: streetSales?.length || 0,
+      city: citySales?.length || 0
     });
 
-    // Filtrer et trier les ventes par distance
+    // Calculer la distance pour chaque vente
     const salesWithDistance = allSales.map(sale => {
+      if (!sale.Latitude || !sale.Longitude) {
+        // Si pas de coordonnées, on met une distance arbitraire élevée
+        return { ...sale, distance: 999 };
+      }
+      
       const distance = calculateDistance(
         latitude,
         longitude,
@@ -152,7 +261,7 @@ Deno.serve(async (req) => {
       total: nearestSales.length,
       ventes: nearestSales.map(sale => ({
         adresse: sale.Adresse,
-        distance: `${sale.distance.toFixed(2)} km`,
+        distance: `${(sale.distance || 0).toFixed(2)} km`,
         prix: sale['Valeur fonciere'],
         surface: sale['Surface reelle bati'],
         date: sale['Date mutation']
@@ -164,7 +273,7 @@ Deno.serve(async (req) => {
     if (nearestSales.length > 0) {
       // Calcul de la moyenne pondérée par la distance
       const weights = nearestSales.map(sale => ({
-        weight: 1 / Math.pow(sale.distance + 0.1, 2),
+        weight: 1 / Math.pow((sale.distance || 999) + 0.1, 2),
         pricePerM2: sale['Valeur fonciere'] / sale['Surface reelle bati']
       }));
 
@@ -187,7 +296,7 @@ Deno.serve(async (req) => {
     }
 
     // Ajustements selon l'état
-    const conditionMultipliers = {
+    const conditionMultipliers: Record<string, number> = {
       'À rénover': 0.8,
       'Travaux à prévoir': 0.9,
       'Bon état': 1,
@@ -196,7 +305,7 @@ Deno.serve(async (req) => {
       'Neuf': 1.2
     };
 
-    const multiplier = conditionMultipliers[propertyData.condition as keyof typeof conditionMultipliers] || 1;
+    const multiplier = conditionMultipliers[propertyData.condition] || 1;
     const adjustedPrice = estimatedPrice * multiplier;
 
     // Calcul de la marge d'erreur
@@ -243,6 +352,12 @@ Deno.serve(async (req) => {
 });
 
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  // Vérifier les valeurs nulles ou invalides
+  if (!lat1 || !lon1 || !lat2 || !lon2 || 
+      isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) {
+    return 999; // Valeur par défaut élevée
+  }
+  
   const R = 6371; // Rayon de la Terre en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
