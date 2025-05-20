@@ -75,7 +75,16 @@ const EstimateForm: React.FC = () => {
 
         <label>
           Année de construction :
-          <input type="number" value={constructionYear ?? ''} onChange={(e) => setConstructionYear(parseInt(e.target.value))} />
+         <input
+  type="number"
+  value={constructionYear}
+  onChange={(e) => {
+    const value = parseInt(e.target.value, 10);
+    if (!isNaN(value)) {
+      setConstructionYear(value);
+    }
+  }}
+/>
         </label>
 
         <label>
