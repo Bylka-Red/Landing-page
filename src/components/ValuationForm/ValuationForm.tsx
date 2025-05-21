@@ -18,12 +18,54 @@ interface PropertyData {
   floor?: number;
   hasElevator?: boolean;
   condition: string;
+  details?: any;
+  features?: any;
+  ownership?: any;
 }
 
 export function ValuationForm({ initialAddress }: ValuationFormProps) {
   const [step, setStep] = useState(1);
   const [propertyData, setPropertyData] = useState<Partial<PropertyData>>({
-    address: initialAddress || ''
+    address: initialAddress || '',
+    type: undefined,
+    details: {
+      livingArea: '',
+      rooms: 1,
+      bathrooms: 1,
+      showers: 0,
+      floor: 0,
+      totalFloors: 1,
+      landArea: 0,
+      hasGarden: false,
+    },
+    features: {
+      basement: false,
+      balcony: false,
+      terrace: false,
+      cellar: false,
+      parking: 0,
+      renovatedFacade: false,
+      constructionYear: '',
+      energyRating: '',
+      condition: '',
+      quality: '',
+      floors: 1,
+      isGroundFloor: false,
+      adjacentType: 'none',
+      hasBasement: 'none',
+      hasGarage: false,
+      hasPool: false,
+      hasElevator: false,
+      parkingSpaces: 0,
+    },
+    ownership: {
+      isOwner: true,
+      sellingTimeline: '',
+      wantsContact: false,
+      firstName: '',
+      lastName: '',
+      phone: '',
+    }
   });
 
   if (!initialAddress) {
@@ -54,17 +96,34 @@ export function ValuationForm({ initialAddress }: ValuationFormProps) {
   };
 
   const handlePropertyDetails = (details: any) => {
-    setPropertyData(prev => ({ ...prev, ...details }));
+    setPropertyData(prev => ({
+      ...prev,
+      livingArea: details.livingArea,
+      rooms: details.rooms,
+      details
+    }));
     setStep(3);
   };
 
   const handlePropertyFeatures = (features: any) => {
-    setPropertyData(prev => ({ ...prev, condition: features.condition }));
+    setPropertyData(prev => ({
+      ...prev,
+      condition: features.condition,
+      constructionYear: features.constructionYear,
+      floor: features.floor,
+      hasElevator: features.hasElevator,
+      features
+    }));
     setStep(4);
   };
 
-  const handleOwnership = () => {
+  const handleOwnership = (ownership: any) => {
+    setPropertyData(prev => ({ ...prev, ownership }));
     setStep(5);
+  };
+
+  const handleBack = () => {
+    setStep(step - 1);
   };
 
   const renderStep = () => {
@@ -76,12 +135,27 @@ export function ValuationForm({ initialAddress }: ValuationFormProps) {
           <PropertyDetailsStep
             type={propertyData.type!}
             onSubmit={handlePropertyDetails}
+            onBack={handleBack}
+            initialData={propertyData.details}
           />
         );
       case 3:
-        return <PropertyFeaturesStep onSubmit={handlePropertyFeatures} />;
+        return (
+          <PropertyFeaturesStep
+            propertyType={propertyData.type!}
+            onSubmit={handlePropertyFeatures}
+            onBack={handleBack}
+            initialData={propertyData.features}
+          />
+        );
       case 4:
-        return <OwnershipStep onSubmit={handleOwnership} />;
+        return (
+          <OwnershipStep
+            onSubmit={handleOwnership}
+            onBack={handleBack}
+            initialData={propertyData.ownership}
+          />
+        );
       case 5:
         return (
           <EstimationResult

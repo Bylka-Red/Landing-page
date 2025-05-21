@@ -1,0 +1,8 @@
+{
+  "functions": [
+    {
+      "name": "send-estimation-email",
+      "path": "./supabase/functions/send-estimation-email"
+    }
+  ]
+}
