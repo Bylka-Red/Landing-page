@@ -53,7 +53,13 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           condition: propertyData.condition
         };
 
-        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/estimate`;
+        // Correction de l'URL Supabase
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error('URL Supabase non définie');
+        }
+
+        const apiUrl = `${supabaseUrl}/functions/v1/estimate`;
 
         // Simulation des étapes d'analyse
         setTimeout(() => setSteps(prev => ({ ...prev, marketAnalysis: true })), 1000);
@@ -96,7 +102,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
             estimationResult: data
           };
 
-          const emailApiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-estimation-email`;
+          const emailApiUrl = `${supabaseUrl}/functions/v1/send-estimation-email`;
           const emailResponse = await fetch(emailApiUrl, {
             method: 'POST',
             headers: {
