@@ -37,7 +37,16 @@ Détails du bien :
 - Adresse : ${propertyData.address}
 - Surface : ${propertyData.livingArea} m²
 - Pièces : ${propertyData.rooms}
-- État : ${propertyData.condition}
+- Salles de bains : ${propertyData.details.bathrooms}
+- Douches : ${propertyData.details.showers}
+${propertyData.type === 'apartment' ? `- Étage : ${propertyData.details.floor === -1 ? 'Rez-de-chaussée' : propertyData.details.floor}
+- Nombre total d'étages : ${propertyData.details.totalFloors}
+- Ascenseur : ${propertyData.features.hasElevator ? 'Oui' : 'Non'}
+- Places de parking : ${propertyData.features.parkingSpaces}` : ''}
+- Année de construction : ${propertyData.features.constructionYear}
+- DPE : ${propertyData.features.energyRating}
+- État : ${propertyData.features.condition}
+- Niveau de qualité : ${propertyData.features.quality}
 
 Estimation :
 - Prix estimé : ${formatPrice(estimationResult.estimated_price)}
