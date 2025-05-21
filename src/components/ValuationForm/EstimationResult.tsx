@@ -53,16 +53,16 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           condition: propertyData.condition
         };
 
-        // Correction de l'URL Supabase
+        // Récupération des variables d'environnement
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
         const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        
+
         if (!supabaseUrl || !supabaseKey) {
           throw new Error('Configuration Supabase manquante');
         }
 
         // S'assurer que l'URL se termine par .co
-        const apiUrl = `${supabaseUrl.replace(/\.c$/, '.co')}/functions/v1/estimate`;
+        const apiUrl = `${supabaseUrl}/functions/v1/estimate`;
 
         // Simulation des étapes d'analyse
         setTimeout(() => setSteps(prev => ({ ...prev, marketAnalysis: true })), 1000);
@@ -105,7 +105,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
             estimationResult: data
           };
 
-          const emailApiUrl = `${supabaseUrl.replace(/\.c$/, '.co')}/functions/v1/send-estimation-email`;
+          const emailApiUrl = `${supabaseUrl}/functions/v1/send-estimation-email`;
           const emailResponse = await fetch(emailApiUrl, {
             method: 'POST',
             headers: {
@@ -125,6 +125,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         }
 
       } catch (error) {
+        console.error('Erreur détaillée:', error);
         setError(error instanceof Error ? error.message : 'Une erreur est survenue lors de l\'estimation');
         setIsLoading(false);
       }
