@@ -59,7 +59,8 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           throw new Error('URL Supabase non définie');
         }
 
-        const apiUrl = `${supabaseUrl}/functions/v1/estimate`;
+        // S'assurer que l'URL se termine par .co
+        const apiUrl = `${supabaseUrl.replace(/\.c$/, '.co')}/functions/v1/estimate`;
 
         // Simulation des étapes d'analyse
         setTimeout(() => setSteps(prev => ({ ...prev, marketAnalysis: true })), 1000);
@@ -102,7 +103,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
             estimationResult: data
           };
 
-          const emailApiUrl = `${supabaseUrl}/functions/v1/send-estimation-email`;
+          const emailApiUrl = `${supabaseUrl.replace(/\.c$/, '.co')}/functions/v1/send-estimation-email`;
           const emailResponse = await fetch(emailApiUrl, {
             method: 'POST',
             headers: {
