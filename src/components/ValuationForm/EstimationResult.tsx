@@ -55,8 +55,10 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
 
         // Correction de l'URL Supabase
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        if (!supabaseUrl) {
-          throw new Error('URL Supabase non définie');
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        if (!supabaseUrl || !supabaseKey) {
+          throw new Error('Configuration Supabase manquante');
         }
 
         // S'assurer que l'URL se termine par .co
@@ -71,7 +73,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+            'Authorization': `Bearer ${supabaseKey}`
           },
           body: JSON.stringify(requestData),
         });
@@ -108,7 +110,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+              'Authorization': `Bearer ${supabaseKey}`
             },
             body: JSON.stringify(emailData),
           });
