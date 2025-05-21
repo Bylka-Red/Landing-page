@@ -125,7 +125,7 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
 
     const timer = setTimeout(() => {
       setShowContactPopup(true);
-    }, 8000); // Augmenté à 8 secondes
+    }, 8000);
 
     return () => clearTimeout(timer);
   }, [propertyData]);

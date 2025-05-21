@@ -47,6 +47,9 @@ export function Hero() {
                   Estimer
                 </button>
               </div>
+              <p className="mt-2 text-sm text-gray-500">
+                Notre algorithme couvre Lagny-sur-Marne et les communes dans un rayon de 15 km
+              </p>
             </div>
           </div>
           
