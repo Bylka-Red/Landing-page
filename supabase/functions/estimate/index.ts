@@ -17,7 +17,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-// Initialisation de Supabase avec l'URL et la clé directement depuis l'environnement Deno
+// Hardcoded values since they're already public in the repository
 const supabaseUrl = 'https://gvqioxquncotpliivnlg.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2cWlveHF1bmNvdHBsaWl2bmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYwMzU4NzYsImV4cCI6MjA2MTYxMTg3Nn0.3LbJWJunMkEwzBDKvEfoqrwJeDutxG-PeLaY99C58kU';
 
