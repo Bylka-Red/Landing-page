@@ -53,7 +53,6 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           condition: propertyData.condition
         };
 
-        // Récupération des variables d'environnement
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
         const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -61,10 +60,8 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
           throw new Error('Configuration Supabase manquante');
         }
 
-        // S'assurer que l'URL se termine par .co
         const apiUrl = `${supabaseUrl}/functions/v1/estimate`;
 
-        // Simulation des étapes d'analyse
         setTimeout(() => setSteps(prev => ({ ...prev, marketAnalysis: true })), 1000);
         setTimeout(() => setSteps(prev => ({ ...prev, comparison: true })), 2500);
         setTimeout(() => setSteps(prev => ({ ...prev, evaluation: true })), 4000);
@@ -85,13 +82,11 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
 
         const data = await response.json();
         
-        // Attendre que toutes les étapes soient terminées avant d'afficher le résultat
         setTimeout(() => {
           setEstimation(data);
           setIsLoading(false);
         }, 4500);
 
-        // Envoi de l'email de notification
         try {
           const emailData = {
             propertyData: {
@@ -215,22 +210,22 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
       </h3>
 
       <div className="p-6 bg-gray-50 rounded-md border-2 border-[#0b8043]">
-        <div className="flex items-center justify-between">
-          <div className="text-center flex-1">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-center w-full sm:w-auto">
             <div className="text-xl font-medium text-gray-900">
               {estimation.price_range.min.toLocaleString()}€
             </div>
             <div className="text-sm text-gray-500">Fourchette basse</div>
           </div>
           
-          <div className="text-center flex-1">
+          <div className="text-center w-full sm:w-auto">
             <div className="text-2xl font-bold text-[#0b8043]">
               {estimation.estimated_price.toLocaleString()}€
             </div>
             <div className="text-sm text-gray-500">Prix moyen estimé</div>
           </div>
           
-          <div className="text-center flex-1">
+          <div className="text-center w-full sm:w-auto">
             <div className="text-xl font-medium text-gray-900">
               {estimation.price_range.max.toLocaleString()}€
             </div>
