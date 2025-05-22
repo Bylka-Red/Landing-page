@@ -5,6 +5,7 @@ interface ContactPopupProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (contactInfo: ContactInfo) => void;
+  estimationData: any;
 }
 
 interface ContactInfo {
@@ -13,7 +14,7 @@ interface ContactInfo {
   phone: string;
 }
 
-export function ContactPopup({ isOpen, onClose, onSubmit }: ContactPopupProps) {
+export function ContactPopup({ isOpen, onClose, onSubmit, estimationData }: ContactPopupProps) {
   const [contactInfo, setContactInfo] = useState<ContactInfo>({
     firstName: '',
     lastName: '',
@@ -59,7 +60,10 @@ export function ContactPopup({ isOpen, onClose, onSubmit }: ContactPopupProps) {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${supabaseKey}`
           },
-          body: JSON.stringify(contactInfo),
+          body: JSON.stringify({
+            contactInfo,
+            estimationData
+          }),
         });
 
         if (!response.ok) {

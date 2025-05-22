@@ -128,8 +128,11 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
 
     fetchEstimation();
 
+    // N'affiche la popup que si l'utilisateur n'a pas déjà demandé à être contacté
     const timer = setTimeout(() => {
-      setShowContactPopup(true);
+      if (!propertyData.ownership.wantsContact) {
+        setShowContactPopup(true);
+      }
     }, 8000);
 
     return () => clearTimeout(timer);
@@ -290,6 +293,10 @@ export function EstimationResult({ onComplete, propertyData }: EstimationResultP
         isOpen={showContactPopup}
         onClose={() => setShowContactPopup(false)}
         onSubmit={handleContactRequest}
+        estimationData={{
+          propertyData,
+          estimation
+        }}
       />
     </div>
   );

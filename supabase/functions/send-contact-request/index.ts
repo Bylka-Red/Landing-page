@@ -17,11 +17,15 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const contactInfo = await req.json();
+    const { contactInfo, estimationData } = await req.json();
 
     if (!contactInfo.firstName || !contactInfo.lastName || !contactInfo.phone) {
       throw new Error('Informations de contact incomplètes');
     }
+
+    const formatPrice = (price: number) => 
+      new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' })
+        .format(price);
 
     const emailText = `Bonjour La Team,
 
@@ -32,7 +36,21 @@ Coordonnées du client :
 - Nom : ${contactInfo.lastName}
 - Téléphone : ${contactInfo.phone}
 
-Le client souhaite être recontacté pour une estimation plus précise de son bien.`;
+Le client souhaite être recontacté pour une estimation plus précise de son bien.
+
+Détails de l'estimation :
+- Type : ${estimationData.propertyData.type === 'house' ? 'Maison' : 'Appartement'}
+- Adresse : ${estimationData.propertyData.address}
+- Surface : ${estimationData.propertyData.livingArea} m²
+- Pièces : ${estimationData.propertyData.rooms}
+- État : ${estimationData.propertyData.condition}
+
+Estimation :
+- Prix estimé : ${formatPrice(estimationData.estimation.estimated_price)}
+- Fourchette : ${formatPrice(estimationData.estimation.price_range.min)} - ${formatPrice(estimationData.estimation.price_range.max)}
+- Prix/m² : ${formatPrice(estimationData.estimation.average_price_per_sqm)}
+- Ventes comparables : ${estimationData.estimation.comparable_sales}
+- Indice de confiance : ${Math.round(estimationData.estimation.confidence_score * 100)}%`;
 
     const { data, error } = await resend.emails.send({
       from: 'onboarding@resend.dev',
