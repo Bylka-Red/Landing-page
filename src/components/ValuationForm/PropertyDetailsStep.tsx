@@ -62,7 +62,7 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
         Caractéristiques principales
       </h3>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         <div className="relative">
           <div className="flex items-center space-x-2 mb-1.5">
             <Ruler className="w-4 h-4 text-[#0b8043]" />
@@ -166,7 +166,7 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
         </div>
 
         {type === 'apartment' && (
-          <div className="grid grid-cols-2 gap-4 col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="relative">
               <div className="flex items-center space-x-2 mb-1.5">
                 <Building2 className="w-4 h-4 text-[#0b8043]" />
@@ -220,7 +220,7 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
         )}
 
         {type === 'apartment' && details.floor === -1 && (
-          <div className="col-span-2">
+          <div className="mt-4">
             <label className="flex items-center space-x-2">
               <input
                 type="checkbox"

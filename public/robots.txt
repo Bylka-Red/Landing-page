@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /*.json$
+
+# Optimisation du crawl
+Crawl-delay: 1
+
+Sitemap: https://estimation.2r-immobilier.fr/sitemap.xml
