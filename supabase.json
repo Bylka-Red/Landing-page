@@ -1,8 +1,16 @@
 {
   "functions": [
     {
+      "name": "estimate",
+      "path": "./supabase/functions/estimate"
+    },
+    {
       "name": "send-estimation-email",
       "path": "./supabase/functions/send-estimation-email"
+    },
+    {
+      "name": "send-contact-request",
+      "path": "./supabase/functions/send-contact-request"
     }
   ]
 }

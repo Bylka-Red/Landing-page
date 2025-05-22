@@ -33,6 +33,7 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
 
   const [errors, setErrors] = useState({
     livingArea: false,
+    landArea: false,
   });
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
   const validateForm = () => {
     const newErrors = {
       livingArea: !details.livingArea,
+      landArea: type === 'house' && !details.landArea,
     };
     setErrors(newErrors);
     return !Object.values(newErrors).some(error => error);
@@ -94,7 +96,7 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
             <div className="flex items-center space-x-2 mb-1.5">
               <Map className="w-4 h-4 text-[#0b8043]" />
               <label className="block text-sm font-medium text-gray-700">
-                Surface du terrain (m²)
+                Surface du terrain (m²) *
               </label>
             </div>
             <input
@@ -103,9 +105,17 @@ export function PropertyDetailsStep({ type, onSubmit, onBack, initialData }: Pro
               onChange={(e) =>
                 setDetails({ ...details, landArea: Number(e.target.value) })
               }
-              className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full px-3 py-2 text-sm rounded-md border-2 border-gray-200 focus:border-[#0b8043] focus:ring-0 transition-colors"
+              className={`[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full px-3 py-2 text-sm rounded-md border-2 ${
+                errors.landArea ? 'border-red-500' : 'border-gray-200'
+              } focus:border-[#0b8043] focus:ring-0 transition-colors`}
               placeholder="300"
+              required
             />
+            {errors.landArea && (
+              <p className="mt-1 text-xs text-red-500">
+                La surface du terrain est requise
+              </p>
+            )}
           </div>
         )}
 
